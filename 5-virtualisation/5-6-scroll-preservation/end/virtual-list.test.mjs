@@ -1226,51 +1226,55 @@ test("preserves normal top observer backward scroll recycling", async (t) => {
 });
 
 test("re-observes bottom sentinel after upward scroll evicts tail page post-exhaustion", async (t) => {
-    t.mock.timers.enable({ apis: ["setTimeout"] });
-    const { root, mockDocument, observers, getTemplate, updateTemplate } = setupDOMEnvironment();
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const { root, mockDocument, observers, getTemplate, updateTemplate } =
+    setupDOMEnvironment();
 
-    const db = initMockDB({ title: "Item", body: "Body" }, 30, 10);
-    const list = new VirtualList(root, {
-        getPage: (page) => db.getPage(page),
-        getTemplate,
-        updateTemplate,
-        pageSize: 10,
-    });
+  const db = initMockDB({ title: "Item", body: "Body" }, 30, 10);
+  const list = new VirtualList(root, {
+    getPage: (page) => db.getPage(page),
+    getTemplate,
+    updateTemplate,
+    pageSize: 10,
+  });
 
-    list.render();
-    t.mock.timers.tick(100);
+  list.render();
+  t.mock.timers.tick(100);
 
-    const observer = observers[0];
-    const topObserver = mockDocument.getElementById("top-observer");
-    const bottomObserver = mockDocument.getElementById("bottom-observer");
+  const observer = observers[0];
+  const topObserver = mockDocument.getElementById("top-observer");
+  const bottomObserver = mockDocument.getElementById("bottom-observer");
 
-    // Exhaust dataset (pages 0, 1, 2 loaded -> page 3 returns [])
-    for (let i = 0; i < 4; i++) {
-        observer.trigger(bottomObserver, true);
-        t.mock.timers.tick(1000);
-        await flushMicrotasks();
-    }
-    assert.equal(list.hasMore, false);
-    assert.equal(observer.observed.has(bottomObserver), false);
-    assert.equal(list.start, 1);
-    assert.equal(list.end, 3);
-
-    // Scroll up -> page 0 loaded, page 2 evicted (start = 0, end = 2), bottom sentinel re-observed
-    observer.trigger(topObserver, true);
-    t.mock.timers.tick(1000);
-    await flushMicrotasks();
-
-    assert.equal(list.start, 0);
-    assert.equal(list.end, 2);
-    assert.equal(list.hasMore, true);
-    assert.equal(observer.observed.has(bottomObserver), true);
-
-    // Scroll down again -> page 2 reloads cleanly
+  // Exhaust dataset (pages 0, 1, 2 loaded -> page 3 returns [])
+  for (let i = 0; i < 4; i++) {
     observer.trigger(bottomObserver, true);
     t.mock.timers.tick(1000);
     await flushMicrotasks();
+  }
+  assert.equal(list.hasMore, false);
+  assert.equal(observer.observed.has(bottomObserver), false);
+  assert.equal(list.start, 1);
+  assert.equal(list.end, 3);
 
-    assert.equal(list.start, 1);
-    assert.equal(list.end, 3);
-    assert.equal(list.pool[19].getElementsByTagName("h3")[0].textContent, "[Entry 29] - Item");
+  // Scroll up -> page 0 loaded, page 2 evicted (start = 0, end = 2), bottom sentinel re-observed
+  observer.trigger(topObserver, true);
+  t.mock.timers.tick(1000);
+  await flushMicrotasks();
+
+  assert.equal(list.start, 0);
+  assert.equal(list.end, 2);
+  assert.equal(list.hasMore, true);
+  assert.equal(observer.observed.has(bottomObserver), true);
+
+  // Scroll down again -> page 2 reloads cleanly
+  observer.trigger(bottomObserver, true);
+  t.mock.timers.tick(1000);
+  await flushMicrotasks();
+
+  assert.equal(list.start, 1);
+  assert.equal(list.end, 3);
+  assert.equal(
+    list.pool[19].getElementsByTagName("h3")[0].textContent,
+    "[Entry 29] - Item",
+  );
 });

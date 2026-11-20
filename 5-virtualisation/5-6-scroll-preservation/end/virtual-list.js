@@ -109,29 +109,6 @@ export class VirtualList {
       for (const entry of entries) {
         if (this.#isLoading) {
           return;
-    /**
-     * Callback implementation for Top and Bottom Intersection observers
-     * @return {IntersectionObserverCallback}
-     */
-    #handleIntersection() {
-        return (entries) => {
-            if (this.#isLoading) {
-                return;
-            }
-            for (const entry of entries) {
-                if (this.#isLoading) {
-                    return;
-                }
-                if (entry.isIntersecting) {
-                    const id = entry.target.id;
-                    if (id === 'top-observer' && this.start > 0) {
-                        void this.#handleTopObserver().catch(() => {});
-                    } else if (id === 'bottom-observer' && this.hasMore) {
-                    } else if (id === 'bottom-observer' && this.#hasMore) {
-                        void this.#handleBottomObserver().catch(() => {});
-                    }
-                }
-            }
         }
         if (entry.isIntersecting) {
           const id = entry.target.id;
@@ -184,63 +161,6 @@ export class VirtualList {
         const [, bottomObserver] = getObservers();
         if (bottomObserver) {
           this.observer?.unobserve?.(bottomObserver);
-    /**
-     * Handles Bottom Observer Intersection event
-     * @returns Promise<void>
-     */
-    async #handleBottomObserver() {
-        if (this.#isLoading || this.isLoading || !this.hasMore) {
-        if (!this.#hasMore || this.#isLoading) {
-            return;
-        }
-        this.#isLoading = true;
-        this.isLoading = true;
-        try {
-            const container = getContainer();
-            const list = getList();
-            const data = await this.props.getPage(this.end);
-            if (!Array.isArray(data) || data.length === 0) {
-                this.#hasMore = false;
-                const [, bottomObserver] = getObservers();
-                if (bottomObserver) {
-                    this.observer?.unobserve?.(bottomObserver);
-                }
-                return;
-            }
-            if (data.length < this.props.pageSize) {
-                this.#hasMore = false;
-                const [, bottomObserver] = getObservers();
-                if (bottomObserver) {
-                    this.observer?.unobserve?.(bottomObserver);
-                }
-                if (this.pool.length >= this.poolLimit) {
-                    return;
-                }
-            }
-            this.end++;
-            if (this.pool.length < this.poolLimit) {
-                const fragment = new DocumentFragment();
-                const elements = data.map(datum => this.props.getTemplate(datum))
-                elements.forEach(el => fragment.appendChild(el));
-                this.pool.push(...elements)
-                list.appendChild(fragment);
-            } else {
-                const [unchanged, recycled] = [
-                    this.pool.slice(this.props.pageSize, this.pool.length),
-                    this.pool.slice(0, this.props.pageSize)
-                ];
-                this.#blurActiveInRecycled(recycled);
-                this.pool = [].concat(
-                    unchanged,
-                    recycled
-                );
-                this.#updateData(recycled, data)
-                this.start++;
-            }
-            this.#updateElement("down");
-            container.style.height = `${container.scrollHeight}px`;
-        } finally {
-            this.#isLoading = false;
         }
         if (this.pool.length >= this.poolLimit) {
           return;
@@ -258,6 +178,7 @@ export class VirtualList {
           this.pool.slice(this.props.pageSize, this.pool.length),
           this.pool.slice(0, this.props.pageSize),
         ];
+        this.#blurActiveInRecycled(recycled);
         this.pool = [].concat(unchanged, recycled);
         this.#updateData(recycled, data);
         this.start++;
@@ -280,11 +201,15 @@ export class VirtualList {
     this.#isLoading = true;
     try {
       const data = await this.props.getPage(this.start - 1);
+      if (!Array.isArray(data) || data.length === 0) {
+        return;
+      }
       this.start--;
       const [recycled, unchanged] = [
         this.pool.slice(this.props.pageSize, this.pool.length),
         this.pool.slice(0, this.props.pageSize),
       ];
+      this.#blurActiveInRecycled(recycled);
       this.pool = [].concat(recycled, unchanged);
       this.#updateElement("up");
       this.#updateData(recycled, data);
@@ -295,50 +220,40 @@ export class VirtualList {
         const [, bottomObserver] = getObservers();
         if (bottomObserver) {
           this.observer?.observe?.(bottomObserver);
-    /**
-     * Handles Top Observer Intersection event
-     * @returns Promise<void>
-     */
-    async #handleTopObserver() {
-        if (this.#isLoading || this.isLoading || this.start <= 0) {
-        if (this.start <= 0 || this.#isLoading) {
-            return;
-        }
-        this.#isLoading = true;
-        this.isLoading = true;
-        try {
-            const data = await this.props.getPage(this.start - 1);
-            if (!Array.isArray(data) || data.length === 0) {
-                return;
-            }
-            this.start--;
-            const [recycled, unchanged] = [
-                this.pool.slice(this.props.pageSize, this.pool.length),
-                this.pool.slice(0, this.props.pageSize)
-            ];
-            this.#blurActiveInRecycled(recycled);
-            this.pool = [].concat(
-                recycled,
-                unchanged
-            );
-            this.#updateElement("up");
-            this.#updateData(recycled, data);
-            this.end--;
-            const wasExhausted = !this.#hasMore;
-            this.#hasMore = true;
-            if (wasExhausted) {
-                const [, bottomObserver] = getObservers();
-                if (bottomObserver) {
-                    this.observer?.observe?.(bottomObserver);
-                }
-            }
-        } finally {
-            this.isLoading = false;
-            this.#isLoading = false;
         }
       }
     } finally {
       this.#isLoading = false;
+    }
+  }
+
+  /**
+   * Blurs `document.activeElement` if focus resides on or inside any element
+   * being recycled so coordinate updates do not trigger browser focus jumps.
+   *
+   * @param recycled {HTMLElement[]}
+   * @return {void}
+   */
+  #blurActiveInRecycled(recycled) {
+    const activeElement =
+      typeof document !== "undefined" ? document.activeElement : null;
+    if (!activeElement || typeof activeElement.blur !== "function") {
+      return;
+    }
+    const containsTarget = (root, target) => {
+      if (root === target) {
+        return true;
+      }
+      if (typeof root?.contains === "function") {
+        return root.contains(target);
+      }
+      if (Array.isArray(root?.children)) {
+        return root.children.some((child) => containsTarget(child, target));
+      }
+      return false;
+    };
+    if (recycled.some((el) => containsTarget(el, activeElement))) {
+      document.activeElement.blur();
     }
   }
 
@@ -359,35 +274,6 @@ export class VirtualList {
       return currentY == null ? null : +currentY;
     });
     const shouldTransform = this.pool.map((el) => Boolean(el.style.transform));
-    /**
-     * Blurs `document.activeElement` if focus resides on or inside any element
-     * being recycled so coordinate updates do not trigger browser focus jumps.
-     *
-     * @param recycled {HTMLElement[]}
-     * @return {void}
-     */
-    #blurActiveInRecycled(recycled) {
-        const activeElement = typeof document !== 'undefined' ? document.activeElement : null;
-        if (!activeElement || typeof activeElement.blur !== 'function') {
-            return;
-        }
-        const containsTarget = (root, target) => {
-            if (root === target) {
-                return true;
-            }
-            if (typeof root?.contains === 'function') {
-                return root.contains(target);
-            }
-            if (Array.isArray(root?.children)) {
-                return root.children.some((child) => containsTarget(child, target));
-            }
-            return false;
-        };
-        if (recycled.some((el) => containsTarget(el, activeElement))) {
-            document.activeElement.blur();
-        }
-    }
-
 
     const lastIndex = this.pool.length - 1;
     const recycledStart = this.pool.length - this.props.pageSize;
