@@ -60,7 +60,24 @@ function y(element, value = undefined) {
 }
 
 export class VirtualList {
+    #hasMore = true;
     #isFetching = false;
+
+    get hasMore() {
+        return this.#hasMore;
+    }
+
+    set hasMore(value) {
+        this.#hasMore = Boolean(value);
+    }
+
+    get isLoading() {
+        return this.#isFetching;
+    }
+
+    set isLoading(value) {
+        this.#isFetching = Boolean(value);
+    }
 
     /**
      * @param root {HTMLElement}
@@ -78,8 +95,8 @@ export class VirtualList {
         this.root = root;
         this.pool = [];
         this.poolLimit = this.props.pageSize * 2;
-        this.hasMore = true;
-        this.isLoading = false;
+        this.#hasMore = true;
+        this.#isFetching = false;
         this.observer = null;
     }
 
@@ -115,11 +132,11 @@ export class VirtualList {
      */
     #handleIntersection() {
         return (entries) => {
-            if (this.#isFetching || this.isLoading) {
+            if (this.#isFetching) {
                 return;
             }
             for (const entry of entries) {
-                if (this.#isFetching || this.isLoading) {
+                if (this.#isFetching) {
                     return;
                 }
                 if (entry.isIntersecting) {
@@ -127,7 +144,7 @@ export class VirtualList {
                     if (id === 'top-observer' && this.start > 0) {
                         void this.#handleTopObserver();
                         return;
-                    } else if (id === 'bottom-observer' && this.hasMore) {
+                    } else if (id === 'bottom-observer' && this.#hasMore) {
                         void this.#handleBottomObserver();
                         return;
                     }
@@ -154,11 +171,10 @@ export class VirtualList {
      * @returns Promise<void>
      */
     async #handleBottomObserver() {
-        if (this.#isFetching || this.isLoading || !this.hasMore) {
+        if (this.#isFetching || !this.#hasMore) {
             return;
         }
         this.#isFetching = true;
-        this.isLoading = true;
         let didUpdate = false;
         let failed = false;
         try {
@@ -167,42 +183,54 @@ export class VirtualList {
             const page = this.end;
             const data = await this.props.getPage(page);
             if (!Array.isArray(data) || data.length === 0) {
-                this.hasMore = false;
+                this.#hasMore = false;
                 const [, bottomObserver] = getObservers();
                 if (bottomObserver) {
                     this.observer?.unobserve?.(bottomObserver);
                 }
             } else {
-                this.end = page + 1;
-                if (this.pool.length < this.poolLimit) {
-                    const fragment = new DocumentFragment();
-                    const elements = data.map(datum => this.props.getTemplate(datum));
-                    elements.forEach(el => fragment.appendChild(el));
-                    this.pool.push(...elements);
-                    list.appendChild(fragment);
-                } else {
-                    const [unchanged, recycled] = [
-                        this.pool.slice(this.props.pageSize, this.pool.length),
-                        this.pool.slice(0, this.props.pageSize)
-                    ];
-                    this.pool = [].concat(
-                        unchanged,
-                        recycled
-                    );
-                    this.#updateData(recycled, data);
-                    this.start++;
+                let shouldRender = true;
+                if (data.length < this.props.pageSize) {
+                    this.#hasMore = false;
+                    const [, bottomObserver] = getObservers();
+                    if (bottomObserver) {
+                        this.observer?.unobserve?.(bottomObserver);
+                    }
+                    if (this.pool.length >= this.poolLimit) {
+                        shouldRender = false;
+                    }
                 }
-                this.#updateElement("down");
-                if (container) {
-                    container.style.height = `${container.scrollHeight}px`;
+                if (shouldRender) {
+                    this.end = page + 1;
+                    if (this.pool.length < this.poolLimit) {
+                        const fragment = new DocumentFragment();
+                        const elements = data.map(datum => this.props.getTemplate(datum));
+                        elements.forEach(el => fragment.appendChild(el));
+                        this.pool.push(...elements);
+                        list.appendChild(fragment);
+                    } else {
+                        const [unchanged, recycled] = [
+                            this.pool.slice(this.props.pageSize, this.pool.length),
+                            this.pool.slice(0, this.props.pageSize)
+                        ];
+                        this.pool = [].concat(
+                            unchanged,
+                            recycled
+                        );
+                        this.#updateData(recycled, data);
+                        this.start++;
+                    }
+                    this.#updateElement("down");
+                    if (container) {
+                        container.style.height = `${container.scrollHeight}px`;
+                    }
+                    didUpdate = true;
                 }
-                didUpdate = true;
             }
         } catch {
             failed = true;
         } finally {
             this.#isFetching = false;
-            this.isLoading = false;
         }
         if (!failed) {
             this.#checkSentinelVisibility(didUpdate ? null : 'bottom-observer');
@@ -214,11 +242,10 @@ export class VirtualList {
      * @returns Promise<void>
      */
     async #handleTopObserver() {
-        if (this.#isFetching || this.isLoading || this.start <= 0) {
+        if (this.#isFetching || this.start <= 0) {
             return;
         }
         this.#isFetching = true;
-        this.isLoading = true;
         let didUpdate = false;
         let failed = false;
         try {
@@ -237,8 +264,8 @@ export class VirtualList {
                 this.#updateData(recycled, data);
                 this.#updateElement("up");
                 this.end--;
-                if (!this.hasMore) {
-                    this.hasMore = true;
+                if (!this.#hasMore) {
+                    this.#hasMore = true;
                     const [, bottomObserver] = getObservers();
                     if (bottomObserver) {
                         this.observer?.observe?.(bottomObserver);
@@ -250,7 +277,6 @@ export class VirtualList {
             failed = true;
         } finally {
             this.#isFetching = false;
-            this.isLoading = false;
         }
         if (!failed) {
             this.#checkSentinelVisibility(didUpdate ? null : 'top-observer');
@@ -265,7 +291,7 @@ export class VirtualList {
      * @returns {void}
      */
     #checkSentinelVisibility(skipObserverId = null) {
-        if (this.#isFetching || this.isLoading || this.pool.length === 0) {
+        if (this.#isFetching || this.pool.length === 0) {
             return;
         }
         const viewportHeight = getViewportHeight();
@@ -284,7 +310,7 @@ export class VirtualList {
         }
 
         const canCheckTop = skipObserverId !== 'top-observer' && this.start > 0 && hasLayoutBox(topRect);
-        const canCheckBottom = skipObserverId !== 'bottom-observer' && this.hasMore && hasLayoutBox(bottomRect);
+        const canCheckBottom = skipObserverId !== 'bottom-observer' && this.#hasMore && hasLayoutBox(bottomRect);
 
         const atTopBoundary = canCheckTop && topRect.bottom >= topRect.height * OBSERVER_THRESHOLD;
         const atBottomBoundary = canCheckBottom && bottomRect.top <= viewportHeight - bottomRect.height * OBSERVER_THRESHOLD;
@@ -394,7 +420,9 @@ export class VirtualList {
      */
     #updateData(elements, data) {
         for (let i = 0; i < elements.length; i++) {
-            this.props.updateTemplate(elements[i], data[i]);
+            if (data?.[i] !== undefined) {
+                this.props.updateTemplate(elements[i], data[i]);
+            }
         }
     }
 
