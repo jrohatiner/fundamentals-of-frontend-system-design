@@ -1,16 +1,12 @@
 import { intersectionObserver } from "../../../utils/observer.js";
+import { MARGIN, getList, y } from "../../../utils/virtual-list-helpers.js";
 
-const MARGIN = 16;
 const OBSERVER_THRESHOLD = 0.25;
 
 const getObservers = () => [
   document.getElementById("top-observer"),
   document.getElementById("bottom-observer"),
 ];
-
-function getList() {
-  return document.getElementById("virtual-list");
-}
 
 function getContainer() {
   return document.getElementById("container");
@@ -74,21 +70,6 @@ function isIntersectingViewport(
   const visibleBottom = Math.min(viewportHeight, rect.bottom);
   const visibleHeight = Math.max(0, visibleBottom - visibleTop);
   return visibleHeight / rect.height >= threshold;
-}
-
-/**
- * Returns `data-y` attribute of the HTMLElement, if value is provided
- * additionally updates the attribute
- *
- * @param element {HTMLElement}
- * @param value {string | number}
- * @returns {?string}
- */
-function y(element, value = undefined) {
-  if (value != null) {
-    element.setAttribute("data-y", value);
-  }
-  return element.getAttribute("data-y");
 }
 
 export class VirtualList {
