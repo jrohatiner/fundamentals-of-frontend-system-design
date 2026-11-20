@@ -1,31 +1,33 @@
 #container {
-    display: flex;
-    flex-direction: column;
-    width: 80%;
-    margin: 0 auto;
-    position: relative;
+  display: flex;
+  flex-direction: column;
+  width: 80%;
+  margin: 0 auto;
+  position: relative;
 }
 .card {
-    background-color: Canvas;
-    color: CanvasText;
-    left: 2rem;
-    right: 2rem;
-    width: calc(100% - 4rem);
-    margin: 0;
-    padding: 1.5rem 2rem;
-    border: 8px solid lightgray;
-    border-radius: 2rem;
-    box-shadow: 0 10px 20px rgba(0,0,0,0.19), 0 6px 6px rgba(0,0,0,0.23);
+  background-color: Canvas;
+  color: CanvasText;
+  left: 2rem;
+  right: 2rem;
+  width: calc(100% - 4rem);
+  margin: 0;
+  padding: 1.5rem 2rem;
+  border: 8px solid lightgray;
+  border-radius: 2rem;
+  box-shadow:
+    0 10px 20px rgba(0, 0, 0, 0.19),
+    0 6px 6px rgba(0, 0, 0, 0.23);
 }
 
 .card[data-y] {
-    position: absolute;
+  position: absolute;
 }
 
 .card:focus-within {
-    z-index: 1;
+  z-index: 1;
 }
 
 #virtual-list {
-    position: relative;
+  position: relative;
 }
