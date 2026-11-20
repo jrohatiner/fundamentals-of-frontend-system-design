@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync } from 'node:fs';
+import { rm } from 'node:fs/promises';
 import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
@@ -75,7 +76,7 @@ async function launchHeadlessChrome() {
             '--remote-debugging-port=0',
             'about:blank',
         ],
-        { stdio: ['ignore', 'ignore', 'pipe'] }
+        { stdio: ['ignore', 'ignore', 'pipe'], detached: true }
     );
 
     const debugPort = await new Promise((resolve, reject) => {
@@ -154,10 +155,20 @@ async function launchHeadlessChrome() {
             ws.close();
         } catch {}
         if (proc.exitCode === null) {
-            proc.kill('SIGKILL');
-            await new Promise((resolve) => proc.once('exit', resolve));
+            const exited = new Promise((resolve) => proc.once('exit', resolve));
+            try {
+                process.kill(-proc.pid, 'SIGKILL');
+            } catch {
+                proc.kill('SIGKILL');
+            }
+            await exited;
         }
-        rmSync(userDataDir, { recursive: true, force: true });
+        await rm(userDataDir, {
+            recursive: true,
+            force: true,
+            maxRetries: 10,
+            retryDelay: 100,
+        });
     }
 
     return { send, evaluate, cleanup };
