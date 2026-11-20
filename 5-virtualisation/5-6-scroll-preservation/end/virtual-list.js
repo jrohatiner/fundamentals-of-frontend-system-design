@@ -31,6 +31,8 @@ function y(element, value = undefined) {
 }
 
 export class VirtualList {
+    #hasMore = true;
+
     /**
      * @param root {HTMLElement}
      * @param props {{
@@ -47,6 +49,7 @@ export class VirtualList {
         this.root = root;
         this.pool = [];
         this.poolLimit = this.props.pageSize * 2;
+        this.#hasMore = true;
     }
 
     /**
@@ -86,7 +89,7 @@ export class VirtualList {
                     const id = entry.target.id;
                     if (id === 'top-observer' && this.start > 0) {
                         void this.#handleTopObserver();
-                    } else if (id === 'bottom-observer') {
+                    } else if (id === 'bottom-observer' && this.#hasMore) {
                         void this.#handleBottomObserver();
                     }
                 }
@@ -111,13 +114,23 @@ export class VirtualList {
      * @returns Promise<void>
      */
     async #handleBottomObserver() {
-        const container = getContainer();
-        const list = getList();
-        const data = await this.props.getPage(this.end++);
-        if (!data?.length) {
-            this.end--;
+        if (!this.#hasMore) {
             return;
         }
+        const container = getContainer();
+        const list = getList();
+        const data = await this.props.getPage(this.end);
+        if (!Array.isArray(data) || data.length === 0) {
+            this.#hasMore = false;
+            return;
+        }
+        if (data.length < this.props.pageSize) {
+            this.#hasMore = false;
+            if (this.pool.length >= this.poolLimit) {
+                return;
+            }
+        }
+        this.end++;
         if (this.pool.length < this.poolLimit) {
             const fragment = new DocumentFragment();
             const elements = data.map(datum => this.props.getTemplate(datum))
@@ -145,6 +158,9 @@ export class VirtualList {
      * @returns Promise<void>
      */
     async #handleTopObserver() {
+        if (this.start <= 0) {
+            return;
+        }
         const data = await this.props.getPage(--this.start)
         const [recycled, unchanged] = [
             this.pool.slice(this.props.pageSize, this.pool.length),
@@ -157,6 +173,7 @@ export class VirtualList {
         this.#updateElement("up");
         this.#updateData(recycled, data);
         this.end--;
+        this.#hasMore = true;
     }
 
 
@@ -257,7 +274,9 @@ export class VirtualList {
      */
     #updateData(elements, data) {
         for (let i = 0; i < elements.length; i++) {
-            this.props.updateTemplate(elements[i], data[i]);
+            if (data?.[i] !== undefined) {
+                this.props.updateTemplate(elements[i], data[i]);
+            }
         }
     }
 
