@@ -1,91 +1,111 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Frontend System Design Fundamentals</title>
-    <link rel="stylesheet" href="../../styles/index.css">
+    <link rel="stylesheet" href="../../styles/index.css" />
     <template id="card_template">
-        <article class="card">
-            <h3 class="card__title" id="card-title"></h3>
-            <div class="card__body">
-                <div class='card__body__image' aria-hidden="true"></div>
-                <section class='card__body__content' contenteditable="true" aria-labelledby="card-title" aria-describedby="slash-instructions">
-                </section>
-            </div>
-        </article>
+      <article class="card">
+        <h3 class="card__title" id="card-title"></h3>
+        <div class="card__body">
+          <div class="card__body__image" aria-hidden="true"></div>
+          <section
+            class="card__body__content"
+            contenteditable="true"
+            aria-labelledby="card-title"
+            aria-describedby="slash-instructions"
+          ></section>
+        </div>
+      </article>
     </template>
-</head>
-<body>
-<main id="container" aria-labelledby="page-title">
-    <h1 id="page-title" class="sr-only">Editable Cards Demonstration</h1>
-    <h2 class="sr-only">Card List</h2>
-    <p id="slash-instructions" class="editor-instructions">
-        Type <code>/h1</code>, <code>/h2</code>, or <code>/h3</code> in any card editor to convert the text block into a heading.
-    </p>
-    <div id="editor-status" class="sr-only" role="status" aria-live="polite" aria-atomic="true"></div>
-    <div id="list"></div>
-    <div id="bottom-observer">
-        Bottom Observer
-    </div>
-</main>
-<script type="module">
-    import {createCardElement, getHeading, HEADING_COMMAND_REGEX} from "./utils.js";
-    import {initMockDB} from "../../utils/db.js";
+  </head>
+  <body>
+    <main id="container" aria-labelledby="page-title">
+      <h1 id="page-title" class="sr-only">Editable Cards Demonstration</h1>
+      <h2 class="sr-only">Card List</h2>
+      <p id="slash-instructions" class="editor-instructions">
+        Type <code>/h1</code>, <code>/h2</code>, or <code>/h3</code> in any card
+        editor to convert the text block into a heading.
+      </p>
+      <div
+        id="editor-status"
+        class="sr-only"
+        role="status"
+        aria-live="polite"
+        aria-atomic="true"
+      ></div>
+      <div id="list"></div>
+      <div id="bottom-observer">Bottom Observer</div>
+    </main>
+    <script type="module">
+      import {
+        createCardElement,
+        getHeading,
+        HEADING_COMMAND_REGEX,
+      } from "./utils.js";
+      import { initMockDB } from "../../utils/db.js";
 
-    const db = initMockDB({
+      const db = initMockDB({
         title: "Fundamentals of Frontend System Design",
-        body: "Learning to use Intersection Observer"
-    });
-    const list = document.getElementById('list');
-    const observerElement = document.getElementById('bottom-observer');
+        body: "Learning to use Intersection Observer",
+      });
+      const list = document.getElementById("list");
+      const observerElement = document.getElementById("bottom-observer");
 
-    const mutationObserver = new MutationObserver((mutations) => {
-        for (const {target, type} of mutations) {
-            const contentContainer = target?.parentElement?.closest('.card__body__content');
-            if (
-                type === 'characterData' &&
-                target.isConnected &&
-                contentContainer?.isContentEditable &&
-                target.parentElement?.isContentEditable &&
-                !target.parentElement.closest('.card__body__content h1, .card__body__content h2, .card__body__content h3') &&
-                HEADING_COMMAND_REGEX.test(target?.textContent ?? '')
-            ) {
-                const element = getHeading(target);
-                target.replaceWith(element);
-                element.focus();
-                const selection = window.getSelection();
-                if (selection) {
-                    const range = document.createRange();
-                    if (element.lastChild?.nodeType === Node.TEXT_NODE) {
-                        range.setStart(element.lastChild, element.lastChild.length);
-                    } else {
-                        range.setStart(element, 0);
-                    }
-                    range.collapse(true);
-                    selection.removeAllRanges();
-                    selection.addRange(range);
-                }
+      const mutationObserver = new MutationObserver((mutations) => {
+        for (const { target, type } of mutations) {
+          const contentContainer = target?.parentElement?.closest(
+            ".card__body__content",
+          );
+          if (
+            type === "characterData" &&
+            target.isConnected &&
+            contentContainer?.isContentEditable &&
+            target.parentElement?.isContentEditable &&
+            !target.parentElement.closest(
+              ".card__body__content h1, .card__body__content h2, .card__body__content h3",
+            ) &&
+            HEADING_COMMAND_REGEX.test(target?.textContent ?? "")
+          ) {
+            const element = getHeading(target);
+            target.replaceWith(element);
+            element.focus();
+            const selection = window.getSelection();
+            if (selection) {
+              const range = document.createRange();
+              if (element.lastChild?.nodeType === Node.TEXT_NODE) {
+                range.setStart(element.lastChild, element.lastChild.length);
+              } else {
+                range.setStart(element, 0);
+              }
+              range.collapse(true);
+              selection.removeAllRanges();
+              selection.addRange(range);
             }
+          }
         }
-    });
-    mutationObserver.observe(list, { characterData: true, subtree: true });
+      });
+      mutationObserver.observe(list, { characterData: true, subtree: true });
 
-    let page = 0;
-    const observer = new IntersectionObserver(async ([bottom]) => {
-        if (bottom.isIntersecting) {
+      let page = 0;
+      const observer = new IntersectionObserver(
+        async ([bottom]) => {
+          if (bottom.isIntersecting) {
             observerElement.textContent = "Loading";
             const data = await db.getPage(page++);
             const fragment = new DocumentFragment();
-            data.forEach(({title, body}) => {
-                const card = createCardElement(title, body);
-                fragment.appendChild(card);
+            data.forEach(({ title, body }) => {
+              const card = createCardElement(title, body);
+              fragment.appendChild(card);
             });
 
             list.appendChild(fragment);
-        }
-    }, {threshold: 0.1})
-    observer.observe(observerElement);
-</script>
-</body>
+          }
+        },
+        { threshold: 0.1 },
+      );
+      observer.observe(observerElement);
+    </script>
+  </body>
 </html>

@@ -1,0 +1,29 @@
+# Dependencies and build outputs
+node_modules/
+dist/
+coverage/
+
+# Plain-text files without Prettier parsers
+.gitignore
+LICENSE
+
+# Binary and large non-text media assets
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.webp
+*.ico
+*.avif
+*.mp4
+*.webm
+*.mp3
+*.wav
+*.woff
+*.woff2
+*.ttf
+*.otf
+*.eot
+*.pdf
+*.zip
+*.tar.gz
