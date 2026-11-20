@@ -35,7 +35,7 @@ function y(element, value = undefined) {
 }
 
 export class VirtualList {
-    #pendingLoads = 0;
+    #isLoading = false;
     #clearStatusTimer = null;
 
     /**
@@ -54,6 +54,10 @@ export class VirtualList {
         this.root = root;
         this.pool = [];
         this.poolLimit = this.props.pageSize * 2;
+        this.hasMore = true;
+        this.isLoading = false;
+        this.observer = null;
+        this.#isLoading = false;
     }
 
     /**
@@ -84,9 +88,11 @@ export class VirtualList {
             clearTimeout(this.#clearStatusTimer);
             this.#clearStatusTimer = null;
         }
-        this.#pendingLoads = 0;
+        this.hasMore = true;
+        this.isLoading = false;
+        this.#isLoading = false;
         this.root.innerHTML = this.toHTML();
-        this.#effect()
+        this.#effect();
     }
 
     /**
@@ -119,7 +125,7 @@ export class VirtualList {
         }
         this.#clearStatusTimer = setTimeout(() => {
             this.#clearStatusTimer = null;
-            if (this.#pendingLoads === 0) {
+            if (!this.#isLoading) {
                 const currentStatus = getStatus();
                 if (currentStatus) {
                     currentStatus.textContent = '';
@@ -135,21 +141,23 @@ export class VirtualList {
      */
     #handleIntersection() {
         return (entries) => {
+            if (this.#isLoading || this.isLoading) {
+                return;
+            }
             for (const entry of entries) {
+                if (this.#isLoading || this.isLoading) {
+                    return;
+                }
                 if (entry.isIntersecting) {
                     const id = entry.target.id;
                     if (id === 'top-observer' && this.start > 0) {
-                        this.#pendingLoads++;
-                        this.#updateStatus('Loading previous items...');
-                        void this.#handleTopObserver();
-                    } else if (id === 'bottom-observer') {
-                        this.#pendingLoads++;
-                        this.#updateStatus('Loading more items...');
-                        void this.#handleBottomObserver();
+                        void this.#handleTopObserver().catch(() => {});
+                    } else if (id === 'bottom-observer' && this.hasMore) {
+                        void this.#handleBottomObserver().catch(() => {});
                     }
                 }
             }
-        }
+        };
     }
 
     /**
@@ -157,11 +165,12 @@ export class VirtualList {
      * @returns void
      */
     #effect() {
-        intersectionObserver(
+        this.observer?.disconnect();
+        this.observer = intersectionObserver(
             getObservers(),
             this.#handleIntersection(),
             {}
-        )
+        );
     }
 
     /**
@@ -169,23 +178,31 @@ export class VirtualList {
      * @returns Promise<void>
      */
     async #handleBottomObserver() {
-        const container = getContainer();
-        const list = getList();
+        if (this.#isLoading || this.isLoading || !this.hasMore) {
+            return;
+        }
+        this.#isLoading = true;
+        this.isLoading = true;
+        this.#updateStatus('Loading more items...');
         try {
-            const data = await this.props.getPage(this.end++);
-            if (!data?.length) {
-                this.end--;
-                this.#pendingLoads = Math.max(0, this.#pendingLoads - 1);
-                if (this.#pendingLoads === 0) {
-                    this.#updateStatus('');
+            const container = getContainer();
+            const list = getList();
+            const data = await this.props.getPage(this.end);
+            if (!Array.isArray(data) || data.length === 0) {
+                this.hasMore = false;
+                const [, bottomObserver] = getObservers();
+                if (bottomObserver) {
+                    this.observer?.unobserve?.(bottomObserver);
                 }
+                this.#updateStatus('');
                 return;
             }
+            this.end++;
             if (this.pool.length < this.poolLimit) {
                 const fragment = new DocumentFragment();
-                const elements = data.map(datum => this.props.getTemplate(datum))
+                const elements = data.map(datum => this.props.getTemplate(datum));
                 elements.forEach(el => fragment.appendChild(el));
-                this.pool.push(...elements)
+                this.pool.push(...elements);
                 list.appendChild(fragment);
             } else {
                 const [unchanged, recycled] = [
@@ -196,26 +213,19 @@ export class VirtualList {
                     unchanged,
                     recycled
                 );
-                this.#updateData(recycled, data)
+                this.#updateData(recycled, data);
                 this.start++;
             }
             this.#updateElement("down");
             container.style.height = `${container.scrollHeight}px`;
-            this.#pendingLoads = Math.max(0, this.#pendingLoads - 1);
-            this.#updateStatus(
-                this.#pendingLoads > 0
-                    ? `Loaded ${data.length} items. Loading more items...`
-                    : `Loaded ${data.length} items.`
-            );
-            if (this.#pendingLoads === 0) {
-                this.#scheduleStatusClear();
-            }
+            this.#updateStatus(`Loaded ${data.length} items.`);
+            this.#scheduleStatusClear();
         } catch (error) {
-            this.#pendingLoads = Math.max(0, this.#pendingLoads - 1);
-            if (this.#pendingLoads === 0) {
-                this.#updateStatus('');
-            }
+            this.#updateStatus('');
             throw error;
+        } finally {
+            this.isLoading = false;
+            this.#isLoading = false;
         }
     }
 
@@ -224,16 +234,19 @@ export class VirtualList {
      * @returns Promise<void>
      */
     async #handleTopObserver() {
+        if (this.#isLoading || this.isLoading || this.start <= 0) {
+            return;
+        }
+        this.#isLoading = true;
+        this.isLoading = true;
+        this.#updateStatus('Loading previous items...');
         try {
-            const data = await this.props.getPage(--this.start)
-            if (!data?.length) {
-                this.start++;
-                this.#pendingLoads = Math.max(0, this.#pendingLoads - 1);
-                if (this.#pendingLoads === 0) {
-                    this.#updateStatus('');
-                }
+            const data = await this.props.getPage(this.start - 1);
+            if (!Array.isArray(data) || data.length === 0) {
+                this.#updateStatus('');
                 return;
             }
+            this.start--;
             const [recycled, unchanged] = [
                 this.pool.slice(this.props.pageSize, this.pool.length),
                 this.pool.slice(0, this.props.pageSize)
@@ -245,21 +258,14 @@ export class VirtualList {
             this.#updateElement("up");
             this.#updateData(recycled, data);
             this.end--;
-            this.#pendingLoads = Math.max(0, this.#pendingLoads - 1);
-            this.#updateStatus(
-                this.#pendingLoads > 0
-                    ? `Loaded ${data.length} previous items. Loading items...`
-                    : `Loaded ${data.length} previous items.`
-            );
-            if (this.#pendingLoads === 0) {
-                this.#scheduleStatusClear();
-            }
+            this.#updateStatus(`Loaded ${data.length} previous items.`);
+            this.#scheduleStatusClear();
         } catch (error) {
-            this.#pendingLoads = Math.max(0, this.#pendingLoads - 1);
-            if (this.#pendingLoads === 0) {
-                this.#updateStatus('');
-            }
+            this.#updateStatus('');
             throw error;
+        } finally {
+            this.isLoading = false;
+            this.#isLoading = false;
         }
     }
 

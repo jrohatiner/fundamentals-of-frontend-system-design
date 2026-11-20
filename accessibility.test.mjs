@@ -542,19 +542,24 @@ test('VirtualList clears loading message immediately on empty batches and handle
     const status = elementsById.get('virtual-list-status');
     const bottom = elementsById.get('bottom-observer');
 
-    // Trigger two rapid consecutive bottom intersections before first resolves
+    // Trigger two rapid consecutive bottom intersections: in-flight lock deduplicates the second trigger
     observerCallback([{ isIntersecting: true, target: bottom }]);
     observerCallback([{ isIntersecting: true, target: bottom }]);
+    assert.equal(resolvers.length, 1);
     assert.equal(status.textContent, 'Loading more items...');
 
-    // First load finishes while second is still pending
+    // First load finishes and announces loaded item count
     resolvers[0]([{ title: 'A' }, { title: 'B' }]);
     await new Promise((r) => setImmediate(r));
-    assert.equal(status.textContent, 'Loaded 2 items. Loading more items...');
+    assert.equal(status.textContent, 'Loaded 2 items.');
 
-    // Second load returns empty batch -> clears loading state cleanly
+    // Subsequent intersection triggers next page, which returns empty batch -> clears loading state cleanly
+    observerCallback([{ isIntersecting: true, target: bottom }]);
+    assert.equal(resolvers.length, 2);
+    assert.equal(status.textContent, 'Loading more items...');
     resolvers[1]([]);
     await new Promise((r) => setImmediate(r));
     assert.equal(status.textContent, '');
+    assert.equal(vl.hasMore, false);
 });
 
