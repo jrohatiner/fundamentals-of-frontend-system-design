@@ -1,8 +1,19 @@
+let cardCounter = 0;
+
 export function createCardElement(title, body) {
   const template = document.getElementById("card_template");
   const element = template.content.cloneNode(true).firstElementChild;
   const [cardTitle] = element.getElementsByTagName("h3");
   const [cardBody] = element.getElementsByTagName("section");
+  const titleId = `card-title-${++cardCounter}`;
+  cardTitle.id = titleId;
+  cardBody.setAttribute("aria-labelledby", titleId);
+  if (
+    !cardBody.getAttribute("aria-describedby") &&
+    document.getElementById("slash-instructions")
+  ) {
+    cardBody.setAttribute("aria-describedby", "slash-instructions");
+  }
   [cardTitle.textContent, cardBody.textContent] = [title, body];
   return element;
 }
@@ -24,5 +35,16 @@ export function getHeading(node) {
   if (trailingText) {
     element.textContent = trailingText;
   }
+
+  const statusRegion = document.getElementById("editor-status");
+  if (statusRegion) {
+    const suffix = trailingText ? `: ${trailingText}` : "";
+    statusRegion.replaceChildren(
+      document.createTextNode(
+        `Converted block to heading level ${level}${suffix}`,
+      ),
+    );
+  }
+
   return element;
 }

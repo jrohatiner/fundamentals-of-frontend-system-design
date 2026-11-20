@@ -7,16 +7,34 @@
     <link rel="stylesheet" href="../../styles/index.css" />
     <template id="card_template">
       <article class="card">
-        <h3 class="card__title"></h3>
+        <h3 class="card__title" id="card-title"></h3>
         <div class="card__body">
-          <div class="card__body__image"></div>
-          <section class="card__body__content" contenteditable="true"></section>
+          <div class="card__body__image" aria-hidden="true"></div>
+          <section
+            class="card__body__content"
+            contenteditable="true"
+            aria-labelledby="card-title"
+            aria-describedby="slash-instructions"
+          ></section>
         </div>
       </article>
     </template>
   </head>
   <body>
-    <main id="container">
+    <main id="container" aria-labelledby="page-title">
+      <h1 id="page-title" class="sr-only">Editable Cards Demonstration</h1>
+      <h2 class="sr-only">Card List</h2>
+      <p id="slash-instructions" class="editor-instructions">
+        Type <code>/h1</code>, <code>/h2</code>, or <code>/h3</code> in any card
+        editor to convert the text block into a heading.
+      </p>
+      <div
+        id="editor-status"
+        class="sr-only"
+        role="status"
+        aria-live="polite"
+        aria-atomic="true"
+      ></div>
       <div id="list"></div>
       <div id="bottom-observer">Bottom Observer</div>
     </main>
