@@ -50,9 +50,12 @@ export class VirtualList {
         this.pool = [];
         this.poolLimit = this.props.pageSize * 2;
         this.hasMore = true;
-        this.isLoading = false;
-        this.observer = null;
         this.#isLoading = false;
+        this.observer = null;
+    }
+
+    get isLoading() {
+        return this.#isLoading;
     }
 
     /**
@@ -97,11 +100,8 @@ export class VirtualList {
                 if (entry.isIntersecting) {
                     const id = entry.target.id;
                     if (id === 'top-observer' && this.start > 0) {
-                        void this.#handleTopObserver();
-                    } else if (id === 'bottom-observer' && this.hasMore) {
-                        void this.#handleBottomObserver();
                         void this.#handleTopObserver().catch(() => {});
-                    } else if (id === 'bottom-observer') {
+                    } else if (id === 'bottom-observer' && this.hasMore) {
                         void this.#handleBottomObserver().catch(() => {});
                     }
                 }
@@ -127,11 +127,7 @@ export class VirtualList {
      * @returns Promise<void>
      */
     async #handleBottomObserver() {
-        if (this.isLoading || !this.hasMore) {
-            return;
-        }
-        this.isLoading = true;
-        if (this.#isLoading) {
+        if (this.#isLoading || !this.hasMore) {
             return;
         }
         this.#isLoading = true;
@@ -145,7 +141,6 @@ export class VirtualList {
                 if (bottomObserver) {
                     this.observer?.unobserve?.(bottomObserver);
                 }
-            if (!data?.length) {
                 return;
             }
             this.end++;
@@ -170,7 +165,6 @@ export class VirtualList {
             this.#updateElement("down");
             container.style.height = `${container.scrollHeight}px`;
         } finally {
-            this.isLoading = false;
             this.#isLoading = false;
         }
     }
@@ -186,6 +180,9 @@ export class VirtualList {
         this.#isLoading = true;
         try {
             const data = await this.props.getPage(this.start - 1);
+            if (!Array.isArray(data) || data.length === 0) {
+                return;
+            }
             this.start--;
             const [recycled, unchanged] = [
                 this.pool.slice(this.props.pageSize, this.pool.length),
@@ -198,6 +195,13 @@ export class VirtualList {
             this.#updateElement("up");
             this.#updateData(recycled, data);
             this.end--;
+            if (!this.hasMore) {
+                this.hasMore = true;
+                const [, bottomObserver] = getObservers();
+                if (bottomObserver) {
+                    this.observer?.observe?.(bottomObserver);
+                }
+            }
         } finally {
             this.#isLoading = false;
         }
