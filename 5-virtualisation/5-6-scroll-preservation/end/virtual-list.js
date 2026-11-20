@@ -116,6 +116,9 @@ export class VirtualList {
                 return;
             }
             for (const entry of entries) {
+                if (this.#isFetching) {
+                    return;
+                }
                 if (entry.isIntersecting) {
                     const id = entry.target.id;
                     if (id === 'top-observer' && this.start > 0) {
