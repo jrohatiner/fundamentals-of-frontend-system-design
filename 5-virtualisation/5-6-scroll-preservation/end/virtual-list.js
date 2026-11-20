@@ -47,6 +47,9 @@ export class VirtualList {
         this.root = root;
         this.pool = [];
         this.poolLimit = this.props.pageSize * 2;
+        this.hasMore = true;
+        this.isLoading = false;
+        this.observer = null;
     }
 
     /**
@@ -86,7 +89,7 @@ export class VirtualList {
                     const id = entry.target.id;
                     if (id === 'top-observer' && this.start > 0) {
                         void this.#handleTopObserver();
-                    } else if (id === 'bottom-observer') {
+                    } else if (id === 'bottom-observer' && this.hasMore) {
                         void this.#handleBottomObserver();
                     }
                 }
@@ -99,11 +102,12 @@ export class VirtualList {
      * @returns void
      */
     #effect() {
-        intersectionObserver(
+        this.observer?.disconnect();
+        this.observer = intersectionObserver(
             getObservers(),
             this.#handleIntersection(),
             {}
-        )
+        );
     }
 
     /**
@@ -111,29 +115,46 @@ export class VirtualList {
      * @returns Promise<void>
      */
     async #handleBottomObserver() {
-        const container = getContainer();
-        const list = getList();
-        const data = await this.props.getPage(this.end++);
-        const fragment = new DocumentFragment();
-        const elements = data.map(datum => this.props.getTemplate(datum))
-        elements.forEach(el => fragment.appendChild(el));
-        if (this.pool.length < this.poolLimit) {
-            this.pool.push(...elements)
-            list.appendChild(fragment);
-        } else {
-            const [unchanged, recycled] = [
-                this.pool.slice(this.props.pageSize, this.pool.length),
-                this.pool.slice(0, this.props.pageSize)
-            ];
-            this.pool = [].concat(
-                unchanged,
-                recycled
-            );
-            this.#updateData(recycled, data)
-            this.start++;
+        if (this.isLoading || !this.hasMore) {
+            return;
         }
-        this.#updateElement("down");
-        container.style.height = `${container.scrollHeight}px`;
+        this.isLoading = true;
+        try {
+            const container = getContainer();
+            const list = getList();
+            const data = await this.props.getPage(this.end);
+            if (!Array.isArray(data) || data.length === 0) {
+                this.hasMore = false;
+                const [, bottomObserver] = getObservers();
+                if (bottomObserver) {
+                    this.observer?.unobserve(bottomObserver);
+                }
+                return;
+            }
+            this.end++;
+            const fragment = new DocumentFragment();
+            const elements = data.map(datum => this.props.getTemplate(datum))
+            elements.forEach(el => fragment.appendChild(el));
+            if (this.pool.length < this.poolLimit) {
+                this.pool.push(...elements)
+                list.appendChild(fragment);
+            } else {
+                const [unchanged, recycled] = [
+                    this.pool.slice(this.props.pageSize, this.pool.length),
+                    this.pool.slice(0, this.props.pageSize)
+                ];
+                this.pool = [].concat(
+                    unchanged,
+                    recycled
+                );
+                this.#updateData(recycled, data)
+                this.start++;
+            }
+            this.#updateElement("down");
+            container.style.height = `${container.scrollHeight}px`;
+        } finally {
+            this.isLoading = false;
+        }
     }
 
     /**
