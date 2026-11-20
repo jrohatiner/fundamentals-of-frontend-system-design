@@ -1,1 +1,18 @@
+# IDE & OS files
 .idea
+.DS_Store
+
+# Dependencies
+node_modules/
+
+# Validation, linter, formatter, and test cache artifacts
+.eslintcache
+.prettiercache
+.stylelintcache
+.cache/
+coverage/
+*.tsbuildinfo
+npm-debug.log*
+.idea
+dist/
+release-assets/
