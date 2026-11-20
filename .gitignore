@@ -13,3 +13,6 @@ node_modules/
 coverage/
 *.tsbuildinfo
 npm-debug.log*
+.idea
+dist/
+release-assets/
