@@ -66,7 +66,8 @@ function setupMockDOM() {
     let observerCallback = null;
     const observedTargets = [];
 
-    const root = new MockElement('body');
+    const root = new MockElement('main', 'container');
+    elementsById.set('container', root);
     Object.defineProperty(root, 'innerHTML', {
         get() {
             return this._innerHTML ?? '';
@@ -74,17 +75,15 @@ function setupMockDOM() {
         set(html) {
             this._innerHTML = html;
             elementsById.clear();
+            elementsById.set('container', this);
             this.children = [];
-            if (html.includes('id="container"')) {
-                const container = new MockElement('div', 'container');
+            if (html.includes('id="virtual-list"')) {
                 const topObserver = new MockElement('div', 'top-observer');
-                const list = new MockElement('main', 'virtual-list');
+                const list = new MockElement('div', 'virtual-list');
                 const bottomObserver = new MockElement('div', 'bottom-observer');
-                container.appendChild(topObserver);
-                container.appendChild(list);
-                container.appendChild(bottomObserver);
-                this.appendChild(container);
-                elementsById.set('container', container);
+                this.appendChild(topObserver);
+                this.appendChild(list);
+                this.appendChild(bottomObserver);
                 elementsById.set('top-observer', topObserver);
                 elementsById.set('virtual-list', list);
                 elementsById.set('bottom-observer', bottomObserver);

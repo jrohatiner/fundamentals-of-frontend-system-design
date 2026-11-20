@@ -3,11 +3,14 @@
 <head>
     <meta charset="UTF-8">
     <title>Frontend System Design Fundamentals</title>
+    <link rel="stylesheet" href="../../styles/index.css">
     <link rel="stylesheet" href="./index.css">
 </head>
 <body>
-<main class="container"></main>
-</body>
+<nav aria-label="Skip links">
+    <a class="skip-link" href="#container">Skip to main content</a>
+</nav>
+<main id="container" class="container" tabindex="-1"></main>
 <script>
     const container = document.getElementById('container');
     const html = `<article class="card">
@@ -34,6 +37,9 @@
         "This is a random body text"
     );
 
-    container.appendChild(component);
+    if (component instanceof Node) {
+        container.appendChild(component);
+    }
 </script>
+</body>
 </html>

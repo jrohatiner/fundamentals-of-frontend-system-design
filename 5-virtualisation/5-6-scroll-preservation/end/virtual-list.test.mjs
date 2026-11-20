@@ -77,17 +77,19 @@ function createDOMEnvironment({ heightForDatum = () => 200 } = {}) {
         set innerHTML(html) {
             this.children = [];
             elementsById.clear();
-            if (html.includes('id="container"')) {
-                const container = new MockElement("div", "container");
+            if (html.includes('id="virtual-list"')) {
+                const container = this.id === "container" ? this : new MockElement("main", "container");
                 const topObserver = new MockElement("div", "top-observer");
-                const list = new MockElement("main", "virtual-list");
+                const list = new MockElement("div", "virtual-list");
                 const bottomObserver = new MockElement("div", "bottom-observer");
                 topObserver._height = 100;
                 bottomObserver._height = 100;
                 container.appendChild(topObserver);
                 container.appendChild(list);
                 container.appendChild(bottomObserver);
-                this.appendChild(container);
+                if (container !== this) {
+                    this.appendChild(container);
+                }
                 elementsById.set("container", container);
                 elementsById.set("top-observer", topObserver);
                 elementsById.set("virtual-list", list);

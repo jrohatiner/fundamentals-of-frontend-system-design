@@ -1,6 +1,32 @@
 * {
     box-sizing: border-box;
 }
+.skip-link {
+    position: absolute;
+    left: -9999px;
+    top: 0.5rem;
+    z-index: 1000;
+    padding: 0.75rem 1rem;
+    background: #111111;
+    color: #ffffff;
+    font-family: system-ui, -apple-system, sans-serif;
+    font-size: 1rem;
+    font-weight: 600;
+    text-decoration: underline;
+    border-radius: 0.5rem;
+}
+.skip-link:focus,
+.skip-link:focus-visible {
+    left: 0.5rem;
+    outline: 3px solid #005fcc;
+    outline-offset: 2px;
+}
+#list-end {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+}
 #container {
     display: flex;
     flex-direction: column;

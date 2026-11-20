@@ -3,6 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <title>Virtualisation</title>
+    <link rel="stylesheet" href="../../../styles/index.css">
     <link rel="stylesheet" href="virtualisation.css">
     <template id="card_template">
         <article class="card">
@@ -16,11 +17,16 @@
     </template>
 </head>
 <body>
-</body>
+<nav aria-label="Skip links">
+    <a class="skip-link" href="#container">Skip to main content</a>
+    <a class="skip-link" href="#list-end">Skip card list</a>
+</nav>
+<main id="container" tabindex="-1"></main>
+<div id="list-end" tabindex="-1"></div>
 <script type="module">
     import {VirtualList} from "./virtual-list.js";
     import {initMockDB} from "../../../utils/db.js";
-    const container = document.body;
+    const container = document.getElementById('container');
     const DB = initMockDB({title: 'Frontend System Design', body: 'Frontend System Design'});
     const template = document.getElementById('card_template');
 
@@ -40,4 +46,5 @@
     });
     list.render();
 </script>
+</body>
 </html>
