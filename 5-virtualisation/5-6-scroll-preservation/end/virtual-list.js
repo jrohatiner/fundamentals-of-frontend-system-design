@@ -58,6 +58,9 @@ export class VirtualList {
         this.root = root;
         this.pool = [];
         this.poolLimit = this.props.pageSize * 2;
+        this.hasMore = true;
+        this.isLoading = false;
+        this.observer = null;
         this.#isLoading = false;
         const configuredSize = this.props.setSize ?? this.props.totalItems;
         if (Number.isInteger(configuredSize) && configuredSize > 0) {
@@ -111,18 +114,18 @@ export class VirtualList {
      */
     #handleIntersection() {
         return (entries) => {
-            if (this.#isLoading) {
+            if (this.#isLoading || this.isLoading) {
                 return;
             }
             for (const entry of entries) {
-                if (this.#isLoading) {
+                if (this.#isLoading || this.isLoading) {
                     return;
                 }
                 if (entry.isIntersecting) {
                     const id = entry.target.id;
                     if (id === 'top-observer' && this.start > 0) {
                         void this.#handleTopObserver().catch(() => {});
-                    } else if (id === 'bottom-observer') {
+                    } else if (id === 'bottom-observer' && this.hasMore) {
                         void this.#handleBottomObserver().catch(() => {});
                     }
                 }
@@ -135,11 +138,12 @@ export class VirtualList {
      * @returns void
      */
     #effect() {
-        intersectionObserver(
+        this.observer?.disconnect?.();
+        this.observer = intersectionObserver(
             getObservers(),
             this.#handleIntersection(),
             {}
-        )
+        );
     }
 
     /**
@@ -147,10 +151,11 @@ export class VirtualList {
      * @returns Promise<void>
      */
     async #handleBottomObserver() {
-        if (this.#isLoading) {
+        if (this.#isLoading || this.isLoading || !this.hasMore) {
             return;
         }
         this.#isLoading = true;
+        this.isLoading = true;
         const container = getContainer();
         const list = getList();
         const pageIndex = this.end;
@@ -158,7 +163,12 @@ export class VirtualList {
         this.#beginLoad(list);
         try {
             const data = await this.props.getPage(pageIndex);
-            if (!data?.length) {
+            if (!Array.isArray(data) || data.length === 0) {
+                this.hasMore = false;
+                const [, bottomObserver] = getObservers();
+                if (bottomObserver) {
+                    this.observer?.unobserve?.(bottomObserver);
+                }
                 if (this.#setSize === -1 && this.#maxKnownItems > 0) {
                     this.#setSize = this.#maxKnownItems;
                     this.#syncPoolSetSize();
@@ -208,6 +218,7 @@ export class VirtualList {
             if (!busyReleased) {
                 this.#endLoad(list);
             }
+            this.isLoading = false;
             this.#isLoading = false;
         }
     }
@@ -217,10 +228,11 @@ export class VirtualList {
      * @returns Promise<void>
      */
     async #handleTopObserver() {
-        if (this.#isLoading) {
+        if (this.#isLoading || this.isLoading) {
             return;
         }
         this.#isLoading = true;
+        this.isLoading = true;
         const list = getList();
         const pageIndex = this.start - 1;
         let busyReleased = false;
@@ -244,6 +256,13 @@ export class VirtualList {
             this.#updateElement("up");
             this.#updateData(recycled, data, basePosInSet);
             this.end--;
+            if (!this.hasMore) {
+                this.hasMore = true;
+                const [, bottomObserver] = getObservers();
+                if (bottomObserver) {
+                    this.observer?.observe?.(bottomObserver);
+                }
+            }
             this.#endLoad(list);
             busyReleased = true;
             this.#announceStatus(basePosInSet, batchEnd);
@@ -251,6 +270,7 @@ export class VirtualList {
             if (!busyReleased) {
                 this.#endLoad(list);
             }
+            this.isLoading = false;
             this.#isLoading = false;
         }
     }
