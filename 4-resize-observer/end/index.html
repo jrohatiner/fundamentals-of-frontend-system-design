@@ -2,6 +2,7 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Frontend System Design Fundamentals</title>
     <style>
       * {
@@ -60,8 +61,17 @@
             borderBoxSize: [{ inlineSize, blockSize }],
             target,
           } = entry;
-          console.log(inlineSize, blockSize);
-          if (inlineSize < 150 && blockSize < 150) {
+          const isSmall = inlineSize < 150 && blockSize < 150;
+          const nextState = isSmall ? "true" : "false";
+          if (target.dataset.small === nextState) {
+            continue;
+          }
+          const isInitialLarge = target.dataset.small === undefined && !isSmall;
+          target.dataset.small = nextState;
+          if (isInitialLarge) {
+            continue;
+          }
+          if (isSmall) {
             target.style.borderRadius = "100%";
             target.style.borderWidth = "4px";
           } else {
@@ -71,7 +81,7 @@
         }
       });
       const elements = document.querySelectorAll(".box");
-      elements.forEach((el) => observer.observe(el));
+      elements.forEach((el) => observer.observe(el, { box: "border-box" }));
     </script>
   </body>
 </html>
