@@ -8,6 +8,8 @@
     margin: 0 auto;
 }
 .card {
+    background-color: Canvas;
+    color: CanvasText;
     margin: 2rem;
     padding: 1.5rem 2rem;
     border: 8px solid lightgray;
