@@ -21,21 +21,34 @@
     import { VirtualList } from "./virtual-list.js";
     import { initMockDB } from "../../../utils/db.js";
     const container = document.body;
-    const DB = initMockDB({
-      title: "Frontend System Design",
-      body: "Frontend System Design",
-    });
+    const TOTAL_ITEMS = 100;
+    const PAGE_SIZE = 10;
+    const DB = initMockDB(
+      { title: "Frontend System Design", body: "Frontend System Design" },
+      TOTAL_ITEMS,
+      PAGE_SIZE,
+    );
     const template = document.getElementById("card_template");
 
-    const updateTemplate = (element, datum) => {
+    const updateTemplate = (
+      element,
+      datum,
+      { posInSet, setSize = TOTAL_ITEMS } = {},
+    ) => {
       const [cardTitle] = element.getElementsByTagName("h3");
       const [cardBody] = element.getElementsByTagName("section");
       [cardTitle.textContent, cardBody.textContent] = [datum.title, datum.body];
+      if (posInSet != null) {
+        element.setAttribute("aria-posinset", String(posInSet));
+      }
+      if (setSize != null) {
+        element.setAttribute("aria-setsize", String(setSize));
+      }
     };
 
-    const getTemplate = (datum) => {
+    const getTemplate = (datum, meta) => {
       const element = template.content.firstElementChild.cloneNode(true);
-      updateTemplate(element, datum);
+      updateTemplate(element, datum, meta);
       return element;
     };
 
@@ -43,7 +56,8 @@
       getPage: (p) => DB.getPage(p),
       getTemplate,
       updateTemplate,
-      pageSize: 10,
+      pageSize: PAGE_SIZE,
+      totalItems: TOTAL_ITEMS,
     });
     list.render();
   </script>
