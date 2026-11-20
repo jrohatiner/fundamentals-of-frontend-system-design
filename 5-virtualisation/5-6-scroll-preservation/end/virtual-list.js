@@ -465,7 +465,7 @@ export class VirtualList {
           this.pool.slice(0, this.props.pageSize),
         ];
         this.#preserveFocusBeforeRecycle(recycled, unchanged, "down");
-        this.pool = [].concat(unchanged, recycled);
+        this.pool = [...unchanged, ...recycled];
         this.#updateData(recycled, data);
         this.start++;
       }
@@ -502,7 +502,7 @@ export class VirtualList {
         this.pool.slice(0, this.pool.length - recycleCount),
       ];
       this.#preserveFocusBeforeRecycle(recycled, unchanged, "up");
-      this.pool = [].concat(recycled, unchanged);
+      this.pool = [...recycled, ...unchanged];
       this.#updateData(recycled, data);
       const { anchorDelta, topY } = this.#updateElement("up", recycleCount);
       this.end--;
