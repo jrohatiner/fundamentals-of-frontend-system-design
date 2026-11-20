@@ -1,5 +1,5 @@
-const DEFAULT_HEADING_TAG = 'h2';
-const HEADING_TAGS = new Set(['h1', 'h2', 'h3', 'h4', 'h5', 'h6']);
+const DEFAULT_HEADING_TAG = "h2";
+const HEADING_TAGS = new Set(["h1", "h2", "h3", "h4", "h5", "h6"]);
 
 /**
  * Normalizes a numeric (1-6) or tag-string ('h1'-'h6') heading level to a
@@ -9,25 +9,35 @@ const HEADING_TAGS = new Set(['h1', 'h2', 'h3', 'h4', 'h5', 'h6']);
  * @returns {'h1' | 'h2' | 'h3' | 'h4' | 'h5' | 'h6'}
  */
 export function normalizeHeadingTag(headingLevel) {
-    if (headingLevel == null) {
-        return DEFAULT_HEADING_TAG;
-    }
-    if (typeof headingLevel === 'number') {
-        if (Number.isInteger(headingLevel) && headingLevel >= 1 && headingLevel <= 6) {
-            return /** @type {'h1' | 'h2' | 'h3' | 'h4' | 'h5' | 'h6'} */ (`h${headingLevel}`);
-        }
-        return DEFAULT_HEADING_TAG;
-    }
-    if (typeof headingLevel === 'string') {
-        const normalized = headingLevel.trim().toLowerCase();
-        if (/^[1-6]$/.test(normalized)) {
-            return /** @type {'h1' | 'h2' | 'h3' | 'h4' | 'h5' | 'h6'} */ (`h${normalized}`);
-        }
-        if (HEADING_TAGS.has(normalized)) {
-            return /** @type {'h1' | 'h2' | 'h3' | 'h4' | 'h5' | 'h6'} */ (normalized);
-        }
+  if (headingLevel == null) {
+    return DEFAULT_HEADING_TAG;
+  }
+  if (typeof headingLevel === "number") {
+    if (
+      Number.isInteger(headingLevel) &&
+      headingLevel >= 1 &&
+      headingLevel <= 6
+    ) {
+      return /** @type {'h1' | 'h2' | 'h3' | 'h4' | 'h5' | 'h6'} */ (
+        `h${headingLevel}`
+      );
     }
     return DEFAULT_HEADING_TAG;
+  }
+  if (typeof headingLevel === "string") {
+    const normalized = headingLevel.trim().toLowerCase();
+    if (/^[1-6]$/.test(normalized)) {
+      return /** @type {'h1' | 'h2' | 'h3' | 'h4' | 'h5' | 'h6'} */ (
+        `h${normalized}`
+      );
+    }
+    if (HEADING_TAGS.has(normalized)) {
+      return /** @type {'h1' | 'h2' | 'h3' | 'h4' | 'h5' | 'h6'} */ (
+        normalized
+      );
+    }
+  }
+  return DEFAULT_HEADING_TAG;
 }
 
 /**
@@ -38,62 +48,65 @@ export function normalizeHeadingTag(headingLevel) {
  * @param {unknown} optionsOrAlt
  * @param {unknown} maybeHeadingLevel
  */
-function parseCardArgs(titleOrDatum, bodyOrOptions, optionsOrAlt, maybeHeadingLevel) {
-    const isDatumObject =
-        titleOrDatum != null &&
-        typeof titleOrDatum === 'object' &&
-        typeof (/** @type {{ nodeType?: unknown }} */ (titleOrDatum).nodeType) !== 'number';
+function parseCardArgs(
+  titleOrDatum,
+  bodyOrOptions,
+  optionsOrAlt,
+  maybeHeadingLevel,
+) {
+  const isDatumObject =
+    titleOrDatum != null &&
+    typeof titleOrDatum === "object" &&
+    typeof (/** @type {{ nodeType?: unknown }} */ (titleOrDatum).nodeType) !==
+      "number";
 
-    if (isDatumObject) {
-        const datum = /** @type {Record<string, any>} */ (titleOrDatum);
-        const opts =
-            bodyOrOptions != null && typeof bodyOrOptions === 'object'
-                ? /** @type {Record<string, any>} */ (bodyOrOptions)
-                : {};
-        return {
-            title: datum.title,
-            body: datum.body,
-            alt: datum.alt ?? datum.imageAlt ?? opts.alt ?? opts.imageAlt,
-            headingLevel:
-                datum.headingLevel ??
-                datum.level ??
-                opts.headingLevel ??
-                opts.level,
-            template: opts.template,
-        };
-    }
-
-    let alt;
-    let headingLevel;
-    let template;
-
-    if (typeof optionsOrAlt === 'string') {
-        alt = optionsOrAlt;
-        if (maybeHeadingLevel != null && typeof maybeHeadingLevel === 'object') {
-            const extra = /** @type {Record<string, any>} */ (maybeHeadingLevel);
-            headingLevel = extra.headingLevel ?? extra.level;
-            template = extra.template;
-        } else {
-            headingLevel = maybeHeadingLevel;
-        }
-    } else if (typeof optionsOrAlt === 'number') {
-        headingLevel = optionsOrAlt;
-    } else if (optionsOrAlt != null && typeof optionsOrAlt === 'object') {
-        const opts = /** @type {Record<string, any>} */ (optionsOrAlt);
-        alt = opts.alt ?? opts.imageAlt;
-        headingLevel = opts.headingLevel ?? opts.level ?? maybeHeadingLevel;
-        template = opts.template;
-    } else {
-        headingLevel = maybeHeadingLevel;
-    }
-
+  if (isDatumObject) {
+    const datum = /** @type {Record<string, any>} */ (titleOrDatum);
+    const opts =
+      bodyOrOptions != null && typeof bodyOrOptions === "object"
+        ? /** @type {Record<string, any>} */ (bodyOrOptions)
+        : {};
     return {
-        title: titleOrDatum,
-        body: bodyOrOptions,
-        alt,
-        headingLevel,
-        template,
+      title: datum.title,
+      body: datum.body,
+      alt: datum.alt ?? datum.imageAlt ?? opts.alt ?? opts.imageAlt,
+      headingLevel:
+        datum.headingLevel ?? datum.level ?? opts.headingLevel ?? opts.level,
+      template: opts.template,
     };
+  }
+
+  let alt;
+  let headingLevel;
+  let template;
+
+  if (typeof optionsOrAlt === "string") {
+    alt = optionsOrAlt;
+    if (maybeHeadingLevel != null && typeof maybeHeadingLevel === "object") {
+      const extra = /** @type {Record<string, any>} */ (maybeHeadingLevel);
+      headingLevel = extra.headingLevel ?? extra.level;
+      template = extra.template;
+    } else {
+      headingLevel = maybeHeadingLevel;
+    }
+  } else if (typeof optionsOrAlt === "number") {
+    headingLevel = optionsOrAlt;
+  } else if (optionsOrAlt != null && typeof optionsOrAlt === "object") {
+    const opts = /** @type {Record<string, any>} */ (optionsOrAlt);
+    alt = opts.alt ?? opts.imageAlt;
+    headingLevel = opts.headingLevel ?? opts.level ?? maybeHeadingLevel;
+    template = opts.template;
+  } else {
+    headingLevel = maybeHeadingLevel;
+  }
+
+  return {
+    title: titleOrDatum,
+    body: bodyOrOptions,
+    alt,
+    headingLevel,
+    template,
+  };
 }
 
 /**
@@ -104,20 +117,18 @@ function parseCardArgs(titleOrDatum, bodyOrOptions, optionsOrAlt, maybeHeadingLe
  * @returns {HTMLElement | null}
  */
 function findCardTitleElement(cardElement) {
-    if (cardElement.children) {
-        for (const child of cardElement.children) {
-            const tag = child.tagName?.toLowerCase();
-            if (
-                child.classList?.contains('card__title') ||
-                (tag && HEADING_TAGS.has(tag))
-            ) {
-                return /** @type {HTMLElement} */ (child);
-            }
-        }
+  if (cardElement.children) {
+    for (const child of cardElement.children) {
+      const tag = child.tagName?.toLowerCase();
+      if (
+        child.classList?.contains("card__title") ||
+        (tag && HEADING_TAGS.has(tag))
+      ) {
+        return /** @type {HTMLElement} */ (child);
+      }
     }
-    return cardElement.querySelector(
-        '.card__title, h1, h2, h3, h4, h5, h6'
-    );
+  }
+  return cardElement.querySelector(".card__title, h1, h2, h3, h4, h5, h6");
 }
 
 /**
@@ -128,28 +139,28 @@ function findCardTitleElement(cardElement) {
  * @returns {HTMLElement}
  */
 function createFallbackCardStructure(doc) {
-    const article = doc.createElement('article');
-    article.className = 'card';
+  const article = doc.createElement("article");
+  article.className = "card";
 
-    const heading = doc.createElement(DEFAULT_HEADING_TAG);
-    heading.className = 'card__title';
+  const heading = doc.createElement(DEFAULT_HEADING_TAG);
+  heading.className = "card__title";
 
-    const bodyWrapper = doc.createElement('div');
-    bodyWrapper.className = 'card__body';
+  const bodyWrapper = doc.createElement("div");
+  bodyWrapper.className = "card__body";
 
-    const image = doc.createElement('div');
-    image.className = 'card__body__image';
-    image.setAttribute('aria-hidden', 'true');
+  const image = doc.createElement("div");
+  image.className = "card__body__image";
+  image.setAttribute("aria-hidden", "true");
 
-    const content = doc.createElement('section');
-    content.className = 'card__body__content';
+  const content = doc.createElement("section");
+  content.className = "card__body__content";
 
-    bodyWrapper.appendChild(image);
-    bodyWrapper.appendChild(content);
-    article.appendChild(heading);
-    article.appendChild(bodyWrapper);
+  bodyWrapper.appendChild(image);
+  bodyWrapper.appendChild(content);
+  article.appendChild(heading);
+  article.appendChild(bodyWrapper);
 
-    return article;
+  return article;
 }
 
 /**
@@ -165,64 +176,70 @@ function createFallbackCardStructure(doc) {
  * @returns {HTMLElement}
  */
 export function updateCardElement(
-    element,
+  element,
+  datumOrTitle,
+  bodyOrOptions,
+  optionsOrAlt,
+  maybeHeadingLevel,
+) {
+  const { title, body, alt, headingLevel } = parseCardArgs(
     datumOrTitle,
     bodyOrOptions,
     optionsOrAlt,
-    maybeHeadingLevel
-) {
-    const { title, body, alt, headingLevel } = parseCardArgs(
-        datumOrTitle,
-        bodyOrOptions,
-        optionsOrAlt,
-        maybeHeadingLevel
-    );
+    maybeHeadingLevel,
+  );
 
-    const targetHeadingTag = normalizeHeadingTag(headingLevel);
-    let cardTitle = findCardTitleElement(element);
+  const targetHeadingTag = normalizeHeadingTag(headingLevel);
+  let cardTitle = findCardTitleElement(element);
 
-    if (cardTitle) {
-        if (cardTitle.tagName.toLowerCase() !== targetHeadingTag) {
-            const doc = element.ownerDocument ?? document;
-            const replacement = doc.createElement(targetHeadingTag);
-            if (cardTitle.attributes) {
-                for (const attr of cardTitle.attributes) {
-                    replacement.setAttribute(attr.name, attr.value);
-                }
-            }
-            if (replacement.classList && !replacement.classList.contains('card__title')) {
-                replacement.classList.add('card__title');
-            }
-            cardTitle.replaceWith(replacement);
-            cardTitle = replacement;
-        } else if (cardTitle.classList && !cardTitle.classList.contains('card__title')) {
-            cardTitle.classList.add('card__title');
+  if (cardTitle) {
+    if (cardTitle.tagName.toLowerCase() !== targetHeadingTag) {
+      const doc = element.ownerDocument ?? document;
+      const replacement = doc.createElement(targetHeadingTag);
+      if (cardTitle.attributes) {
+        for (const attr of cardTitle.attributes) {
+          replacement.setAttribute(attr.name, attr.value);
         }
-        cardTitle.textContent = title == null ? '' : String(title);
+      }
+      if (
+        replacement.classList &&
+        !replacement.classList.contains("card__title")
+      ) {
+        replacement.classList.add("card__title");
+      }
+      cardTitle.replaceWith(replacement);
+      cardTitle = replacement;
+    } else if (
+      cardTitle.classList &&
+      !cardTitle.classList.contains("card__title")
+    ) {
+      cardTitle.classList.add("card__title");
     }
+    cardTitle.textContent = title == null ? "" : String(title);
+  }
 
-    const cardImage = element.querySelector('.card__body__image');
-    if (cardImage) {
-        const hasAlt = typeof alt === 'string' && alt.trim().length > 0;
-        if (hasAlt) {
-            cardImage.removeAttribute('aria-hidden');
-            cardImage.setAttribute('role', 'img');
-            cardImage.setAttribute('aria-label', alt);
-        } else {
-            cardImage.removeAttribute('role');
-            cardImage.removeAttribute('aria-label');
-            cardImage.setAttribute('aria-hidden', 'true');
-        }
+  const cardImage = element.querySelector(".card__body__image");
+  if (cardImage) {
+    const hasAlt = typeof alt === "string" && alt.trim().length > 0;
+    if (hasAlt) {
+      cardImage.removeAttribute("aria-hidden");
+      cardImage.setAttribute("role", "img");
+      cardImage.setAttribute("aria-label", alt);
+    } else {
+      cardImage.removeAttribute("role");
+      cardImage.removeAttribute("aria-label");
+      cardImage.setAttribute("aria-hidden", "true");
     }
+  }
 
-    const cardBody =
-        element.querySelector('.card__body__content') ??
-        element.getElementsByTagName?.('section')?.[0];
-    if (cardBody) {
-        cardBody.textContent = body == null ? '' : String(body);
-    }
+  const cardBody =
+    element.querySelector(".card__body__content") ??
+    element.getElementsByTagName?.("section")?.[0];
+  if (cardBody) {
+    cardBody.textContent = body == null ? "" : String(body);
+  }
 
-    return element;
+  return element;
 }
 
 /**
@@ -238,34 +255,38 @@ export function updateCardElement(
  * @returns {HTMLElement}
  */
 export function createCardElement(
+  titleOrDatum,
+  bodyOrOptions,
+  optionsOrAlt,
+  maybeHeadingLevel,
+) {
+  const parsed = parseCardArgs(
     titleOrDatum,
     bodyOrOptions,
     optionsOrAlt,
-    maybeHeadingLevel
-) {
-    const parsed = parseCardArgs(
-        titleOrDatum,
-        bodyOrOptions,
-        optionsOrAlt,
-        maybeHeadingLevel
-    );
+    maybeHeadingLevel,
+  );
 
-    const template =
-        parsed.template ??
-        (typeof document !== 'undefined'
-            ? /** @type {HTMLTemplateElement | null} */ (document.getElementById('card_template'))
-            : null);
+  const template =
+    parsed.template ??
+    (typeof document !== "undefined"
+      ? /** @type {HTMLTemplateElement | null} */ (
+          document.getElementById("card_template")
+        )
+      : null);
 
-    const element = template?.content?.firstElementChild
-        ? /** @type {HTMLElement} */ (template.content.firstElementChild.cloneNode(true))
-        : createFallbackCardStructure(template?.ownerDocument ?? document);
+  const element = template?.content?.firstElementChild
+    ? /** @type {HTMLElement} */ (
+        template.content.firstElementChild.cloneNode(true)
+      )
+    : createFallbackCardStructure(template?.ownerDocument ?? document);
 
-    return updateCardElement(element, {
-        title: parsed.title,
-        body: parsed.body,
-        alt: parsed.alt,
-        headingLevel: parsed.headingLevel,
-    });
+  return updateCardElement(element, {
+    title: parsed.title,
+    body: parsed.body,
+    alt: parsed.alt,
+    headingLevel: parsed.headingLevel,
+  });
 }
 
 /**
@@ -278,8 +299,8 @@ export function createCardElement(
  * @returns {HTMLElement}
  */
 export function getOrUpdateCardElement(element, datum, options) {
-    if (element == null) {
-        return createCardElement(datum, options);
-    }
-    return updateCardElement(element, datum, options);
+  if (element == null) {
+    return createCardElement(datum, options);
+  }
+  return updateCardElement(element, datum, options);
 }
