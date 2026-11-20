@@ -1,36 +1,40 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Virtualisation</title>
-    <link rel="stylesheet" href="virtualisation.css">
+    <link rel="stylesheet" href="virtualisation.css" />
     <template id="card_template">
-        <article class="card">
-            <h3></h3>
-            <div class="card__body">
-                <div class='card__body__image'></div>
-                <section class='card__body__content' contenteditable="true">
-                </section>
-            </div>
-        </article>
+      <article class="card">
+        <h3></h3>
+        <div class="card__body">
+          <div class="card__body__image"></div>
+          <section class="card__body__content" contenteditable="true"></section>
+        </div>
+      </article>
     </template>
-</head>
-<body>
-</body>
-<script type="module">
-    import {VirtualList} from "./virtual-list.js";
-    import {createCardElement, updateCardElement} from "../../../utils/card.js";
-    import {initMockDB} from "../../../utils/db.js";
+  </head>
+  <body></body>
+  <script type="module">
+    import { VirtualList } from "./virtual-list.js";
+    import {
+      createCardElement,
+      updateCardElement,
+    } from "../../../utils/card.js";
+    import { initMockDB } from "../../../utils/db.js";
     const container = document.body;
-    const DB = initMockDB({title: 'Frontend System Design', body: 'Frontend System Design'});
+    const DB = initMockDB({
+      title: "Frontend System Design",
+      body: "Frontend System Design",
+    });
 
     const list = new VirtualList(container, {
-        getPage: (p) => DB.getPage(p),
-        getTemplate: createCardElement,
-        updateTemplate: updateCardElement,
-        pageSize: 10
+      getPage: (p) => DB.getPage(p),
+      getTemplate: createCardElement,
+      updateTemplate: updateCardElement,
+      pageSize: 10,
     });
     list.render();
-</script>
+  </script>
 </html>

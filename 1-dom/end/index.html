@@ -1,33 +1,32 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Frontend System Design Fundamentals</title>
-    <link rel="stylesheet" href="./index.css">
+    <link rel="stylesheet" href="./index.css" />
     <template id="card_template">
-        <article class="card">
-            <h3></h3>
-            <div class="card__body">
-                <div class='card__body__image'></div>
-                <section class='card__body__content'>
-                </section>
-            </div>
-        </article>
+      <article class="card">
+        <h3></h3>
+        <div class="card__body">
+          <div class="card__body__image"></div>
+          <section class="card__body__content"></section>
+        </div>
+      </article>
     </template>
-</head>
-<body>
-<main id="container">
+  </head>
+  <body>
+    <main id="container"></main>
+    <script type="module">
+      import { createCardElement } from "../../utils/card.js";
 
-</main>
-<script type="module">
-    import {createCardElement} from "../../utils/card.js";
-
-    const container = document.getElementById('container');
-    container.appendChild(createCardElement(
-        "Frontend System Design: Fundamentals",
-        "This is a random content"
-    ))
-</script>
-</body>
+      const container = document.getElementById("container");
+      container.appendChild(
+        createCardElement(
+          "Frontend System Design: Fundamentals",
+          "This is a random content",
+        ),
+      );
+    </script>
+  </body>
 </html>
