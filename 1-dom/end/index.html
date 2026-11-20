@@ -7,26 +7,22 @@
     <link rel="stylesheet" href="./index.css" />
     <template id="card_template">
       <article class="card">
-        <h3></h3>
+        <h2 class="card__title"></h2>
         <div class="card__body">
-          <div class="card__body__image"></div>
+          <div class="card__body__image" aria-hidden="true"></div>
           <section class="card__body__content"></section>
         </div>
       </article>
     </template>
   </head>
   <body>
-    <main id="container"></main>
-    <script>
+    <main id="container">
+      <h1>Frontend System Design Fundamentals</h1>
+    </main>
+    <script type="module">
+      import { createCardElement } from "../../utils/card.js";
+
       const container = document.getElementById("container");
-      function createCardElement(title, body) {
-        const template = document.getElementById("card_template");
-        const element = template.content.cloneNode(true).firstElementChild;
-        const [cardTitle] = element.getElementsByTagName("h3");
-        const [cardBody] = element.getElementsByTagName("section");
-        [cardTitle.textContent, cardBody.textContent] = [title, body];
-        return element;
-      }
       container.appendChild(
         createCardElement(
           "Frontend System Design: Fundamentals",

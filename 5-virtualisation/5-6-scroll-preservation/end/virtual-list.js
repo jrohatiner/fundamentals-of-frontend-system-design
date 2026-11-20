@@ -29,20 +29,6 @@ function adjustWindowScroll(scrollDelta) {
   }
 }
 
-/**
- * Returns `data-y` attribute of the HTMLElement, if value is provided
- * additionally updates the attribute
- *
- * @param element {HTMLElement}
- * @param value {string | number}
- * @returns {?string}
- */
-function y(element, value = undefined) {
-  if (value != null) {
-    element.setAttribute("data-y", value);
-  }
-}
-
 export class VirtualList {
   #hasMore = true;
   #isLoading = false;
@@ -94,11 +80,12 @@ export class VirtualList {
    * @returns {string}
    */
   toHTML() {
-    return `<div id="container">
+    return `<main id="container">
+        <h1>Virtualisation</h1>
         <div id="top-observer">Top Observer</div>
-        <main id="virtual-list"></main>
+        <div id="virtual-list"></div>
         <div id="bottom-observer">Bottom Observer</div>
-        </div>`.trim();
+        </main>`.trim();
   }
 
   /**
@@ -211,7 +198,6 @@ export class VirtualList {
         ];
         this.#blurActiveInRecycled(recycled);
         this.pool = [...unchanged, ...recycled];
-        this.pool = [].concat(unchanged, recycled);
         this.#updateData(recycled, data);
         this.start++;
       }
@@ -249,7 +235,6 @@ export class VirtualList {
       ];
       this.#blurActiveInRecycled(recycled);
       this.pool = [...recycled, ...unchanged];
-      this.pool = [].concat(recycled, unchanged);
       this.#updateData(recycled, data);
       const { anchorDelta, topY } = this.#updateElement("up", recycleCount);
       this.end--;

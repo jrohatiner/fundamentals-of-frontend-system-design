@@ -1465,7 +1465,7 @@ describe("VirtualList active element blur guard and static card template", () =>
       // Attach a focusable button inside Entry 0 (first card in pool, which will be recycled next)
       await evaluate(`(() => {
             const firstCard = Array.from(document.querySelectorAll('#virtual-list .card'))
-                .find((c) => c.querySelector('h3')?.textContent.includes('[Entry 0]'));
+                .find((c) => c.querySelector('.card__title')?.textContent.includes('[Entry 0]'));
             const btn = document.createElement('button');
             btn.id = 'recycled-focus-probe';
             btn.textContent = 'Focus Probe';
@@ -1488,7 +1488,7 @@ describe("VirtualList active element blur guard and static card template", () =>
         `document.getElementById('bottom-observer').scrollIntoView()`,
       );
       await waitFor(
-        `Array.from(document.querySelectorAll('#virtual-list .card h3')).some((h) => h.textContent.includes('[Entry 29]'))`,
+        `Array.from(document.querySelectorAll('#virtual-list .card .card__title')).some((h) => h.textContent.includes('[Entry 29]'))`,
       );
 
       const afterDownRecycle = await evaluate(`({
@@ -1515,10 +1515,10 @@ describe("VirtualList active element blur guard and static card template", () =>
         `document.getElementById('top-observer').scrollIntoView()`,
       );
       await waitFor(
-        `Array.from(document.querySelectorAll('#virtual-list .card h3')).some((h) => h.textContent.includes('[Entry 0]'))`,
+        `Array.from(document.querySelectorAll('#virtual-list .card .card__title')).some((h) => h.textContent.includes('[Entry 0]'))`,
       );
       const hasEntry0 = await evaluate(
-        `Array.from(document.querySelectorAll('#virtual-list .card h3')).some((h) => h.textContent.includes('[Entry 0]'))`,
+        `Array.from(document.querySelectorAll('#virtual-list .card .card__title')).some((h) => h.textContent.includes('[Entry 0]'))`,
       );
       assert.equal(hasEntry0, true);
     },

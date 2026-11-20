@@ -6,12 +6,6 @@ const getObservers = () => [
   document.getElementById("bottom-observer"),
 ];
 
-function getList() {
-  return document.getElementById("virtual-list");
-function getContainer() {
-  return document.getElementById("container");
-}
-
 /**
  * Part 5 - Handle top observer
  *
@@ -47,11 +41,12 @@ export class VirtualList {
    * @returns {string}
    */
   toHTML() {
-    return `<div id="container">
+    return `<main id="container">
+        <h1>Virtualisation</h1>
         <div id="top-observer">Top Observer</div>
-        <main id="virtual-list"></main>
+        <div id="virtual-list"></div>
         <div id="bottom-observer">Bottom Observer</div>
-        </div>`.trim();
+        </main>`.trim();
   }
 
   /**

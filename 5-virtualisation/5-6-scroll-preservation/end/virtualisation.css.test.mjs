@@ -372,7 +372,7 @@ describe("Virtual list .card inset offsets and dynamic width calculation", () =>
     // Scroll to bottom-observer twice to populate pool (20 cards) and trigger recycling
     for (let step = 0; step < 2; step++) {
       const prevTitles = await chrome.evaluate(
-        `Array.from(document.querySelectorAll('#virtual-list .card h3')).map(h => h.textContent).join('|')`,
+        `Array.from(document.querySelectorAll('#virtual-list .card .card__title')).map(h => h.textContent).join('|')`,
       );
       await chrome.evaluate(
         `document.getElementById('bottom-observer').scrollIntoView()`,
@@ -380,7 +380,7 @@ describe("Virtual list .card inset offsets and dynamic width calculation", () =>
       const deadline = Date.now() + 5_000;
       while (Date.now() < deadline) {
         const nextTitles = await chrome.evaluate(
-          `Array.from(document.querySelectorAll('#virtual-list .card h3')).map(h => h.textContent).join('|')`,
+          `Array.from(document.querySelectorAll('#virtual-list .card .card__title')).map(h => h.textContent).join('|')`,
         );
         if (nextTitles !== prevTitles) {
           break;

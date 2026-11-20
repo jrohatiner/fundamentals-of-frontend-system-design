@@ -6,27 +6,6 @@ const getObservers = () => [
   document.getElementById("bottom-observer"),
 ];
 
-function getList() {
-  return document.getElementById("virtual-list");
-}
-
-/**
- * Returns `data-y` attribute of the HTMLElement, if value is provided
- * additionally updates the attribute
- *
- * @param element {HTMLElement}
- * @param value {string | number}
- * @returns {?string}
- */
-function y(element, value = undefined) {
-  if (value != null) {
-    element.setAttribute("data-y", value);
-  }
-  return element.getAttribute("data-y");
-function getContainer() {
-  return document.getElementById("container");
-}
-
 export class VirtualList {
   /**
    * @param root {HTMLElement}
@@ -55,11 +34,12 @@ export class VirtualList {
    * @returns {string}
    */
   toHTML() {
-    return `<div id="container">
+    return `<main id="container">
+        <h1>Virtualisation</h1>
         <div id="top-observer">Top Observer</div>
-        <main id="virtual-list"></main>
+        <div id="virtual-list"></div>
         <div id="bottom-observer">Bottom Observer</div>
-        </div>`.trim();
+        </main>`.trim();
   }
 
   /**
