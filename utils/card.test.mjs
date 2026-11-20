@@ -352,13 +352,16 @@ async function launchHeadlessChrome() {
 
     async function cleanup() {
         try {
+            await send('Browser.close');
+        } catch {}
+        try {
             ws.close();
         } catch {}
         if (proc.exitCode === null) {
             proc.kill('SIGKILL');
-            await new Promise((resolve) => proc.once('exit', resolve));
+            await new Promise((resolve) => proc.once('close', resolve));
         }
-        rmSync(userDataDir, { recursive: true, force: true });
+        rmSync(userDataDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
     }
 
     return { send, evaluate, cleanup };
