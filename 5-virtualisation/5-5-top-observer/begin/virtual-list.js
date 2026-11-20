@@ -27,11 +27,19 @@ function getVerticalMargin(element) {
         const style = getComputedStyle(element);
         const marginTop = parseFloat(style?.marginTop);
         const marginBottom = parseFloat(style?.marginBottom);
-        if (Number.isFinite(marginTop) || Number.isFinite(marginBottom)) {
-            return Math.max(
-                Number.isFinite(marginTop) ? marginTop : 0,
-                Number.isFinite(marginBottom) ? marginBottom : 0
-            );
+        const maxMargin = Math.max(
+            Number.isFinite(marginTop) ? marginTop : 0,
+            Number.isFinite(marginBottom) ? marginBottom : 0
+        );
+        if (maxMargin > 0) {
+            return maxMargin;
+        }
+        const root = typeof document !== 'undefined' ? document.documentElement : null;
+        if (root) {
+            const rootFontSize = parseFloat(getComputedStyle(root)?.fontSize);
+            if (Number.isFinite(rootFontSize) && rootFontSize > 0) {
+                return 2 * rootFontSize;
+            }
         }
     }
     return 2 * MARGIN;

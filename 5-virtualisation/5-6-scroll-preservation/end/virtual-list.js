@@ -27,11 +27,19 @@ function getVerticalMargin(element) {
         const style = getComputedStyle(element);
         const marginTop = parseFloat(style?.marginTop);
         const marginBottom = parseFloat(style?.marginBottom);
-        if (Number.isFinite(marginTop) || Number.isFinite(marginBottom)) {
-            return Math.max(
-                Number.isFinite(marginTop) ? marginTop : 0,
-                Number.isFinite(marginBottom) ? marginBottom : 0
-            );
+        const maxMargin = Math.max(
+            Number.isFinite(marginTop) ? marginTop : 0,
+            Number.isFinite(marginBottom) ? marginBottom : 0
+        );
+        if (maxMargin > 0) {
+            return maxMargin;
+        }
+        const root = typeof document !== 'undefined' ? document.documentElement : null;
+        if (root) {
+            const rootFontSize = parseFloat(getComputedStyle(root)?.fontSize);
+            if (Number.isFinite(rootFontSize) && rootFontSize > 0) {
+                return 2 * rootFontSize;
+            }
         }
     }
     return 2 * MARGIN;
@@ -53,7 +61,6 @@ function y(element, value = undefined) {
 }
 
 export class VirtualList {
-    #isLoading = false;
     #resizeObserver = null;
     #cardSizes = new WeakMap();
     #rafId = null;
@@ -75,7 +82,9 @@ export class VirtualList {
         this.root = root;
         this.pool = [];
         this.poolLimit = this.props.pageSize * 2;
-        this.#isLoading = false;
+        this.hasMore = true;
+        this.isLoading = false;
+        this.observer = null;
     }
 
     /**
@@ -100,7 +109,8 @@ export class VirtualList {
      * @returns void
      */
     render() {
-        this.#isLoading = false;
+        this.hasMore = true;
+        this.isLoading = false;
         this.#minContainerHeight = 0;
         this.root.innerHTML = this.toHTML();
         this.#effect()
@@ -112,18 +122,18 @@ export class VirtualList {
      */
     #handleIntersection() {
         return (entries) => {
-            if (this.#isLoading) {
+            if (this.isLoading) {
                 return;
             }
             for (const entry of entries) {
-                if (this.#isLoading) {
+                if (this.isLoading) {
                     return;
                 }
                 if (entry.isIntersecting) {
                     const id = entry.target.id;
                     if (id === 'top-observer' && this.start > 0) {
                         void this.#handleTopObserver().catch(() => {});
-                    } else if (id === 'bottom-observer') {
+                    } else if (id === 'bottom-observer' && this.hasMore) {
                         void this.#handleBottomObserver().catch(() => {});
                     }
                 }
@@ -251,11 +261,13 @@ export class VirtualList {
      * @returns void
      */
     #effect() {
-        intersectionObserver(
+        this.observer?.disconnect?.();
+        this.observer = intersectionObserver(
             getObservers(),
             this.#handleIntersection(),
             {}
         );
+        this.#resizeObserver?.disconnect?.();
         this.#resizeObserver = resizeObserver(
             this.pool,
             this.#handleResize()
@@ -267,14 +279,19 @@ export class VirtualList {
      * @returns Promise<void>
      */
     async #handleBottomObserver() {
-        if (this.#isLoading) {
+        if (this.isLoading || !this.hasMore) {
             return;
         }
-        this.#isLoading = true;
+        this.isLoading = true;
         try {
             const list = getList();
             const data = await this.props.getPage(this.end);
-            if (!data?.length) {
+            if (!Array.isArray(data) || data.length === 0) {
+                this.hasMore = false;
+                const [, bottomObserver] = getObservers();
+                if (bottomObserver) {
+                    this.observer?.unobserve?.(bottomObserver);
+                }
                 return;
             }
             this.end++;
@@ -299,7 +316,7 @@ export class VirtualList {
             }
             this.#updateElement("down");
         } finally {
-            this.#isLoading = false;
+            this.isLoading = false;
         }
     }
 
@@ -308,13 +325,13 @@ export class VirtualList {
      * @returns Promise<void>
      */
     async #handleTopObserver() {
-        if (this.#isLoading) {
+        if (this.isLoading) {
             return;
         }
-        this.#isLoading = true;
+        this.isLoading = true;
         try {
             const data = await this.props.getPage(this.start - 1);
-            if (!data?.length) {
+            if (!Array.isArray(data) || data.length === 0) {
                 return;
             }
             this.start--;
@@ -329,8 +346,15 @@ export class VirtualList {
             this.#updateData(recycled, data);
             this.#updateElement("up");
             this.end--;
+            if (!this.hasMore) {
+                this.hasMore = true;
+                const [, bottomObserver] = getObservers();
+                if (bottomObserver) {
+                    this.observer?.observe?.(bottomObserver);
+                }
+            }
         } finally {
-            this.#isLoading = false;
+            this.isLoading = false;
         }
     }
 

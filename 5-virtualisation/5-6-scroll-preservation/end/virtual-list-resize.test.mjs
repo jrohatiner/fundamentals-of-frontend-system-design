@@ -432,14 +432,21 @@ describe("Browser integration: ResizeObserver text scaling, text spacing, and fo
                 "--remote-debugging-port=0",
                 "about:blank",
             ],
-            { stdio: ["ignore", "ignore", "pipe"] }
+            { stdio: ["ignore", "ignore", "pipe"], detached: true }
         );
         t.after(async () => {
             if (proc.exitCode === null) {
-                proc.kill("SIGKILL");
+                try {
+                    process.kill(-proc.pid, "SIGKILL");
+                } catch {
+                    proc.kill("SIGKILL");
+                }
                 await new Promise((resolve) => proc.once("exit", resolve));
             }
-            rmSync(userDataDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
+            proc.stderr.destroy();
+            try {
+                rmSync(userDataDir, { recursive: true, force: true });
+            } catch {}
         });
 
         const debugPort = await new Promise((resolve, reject) => {
