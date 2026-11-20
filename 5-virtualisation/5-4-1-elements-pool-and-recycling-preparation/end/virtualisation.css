@@ -1,15 +1,16 @@
 #container {
-    position: relative;
+  position: relative;
 }
 
 .card {
-    width: 100%;
+  width: 100%;
 }
 
-#top-observer, #bottom-observer {
-    position: relative;
+#top-observer,
+#bottom-observer {
+  position: relative;
 }
 
 #virtual-list {
-    position: relative;
+  position: relative;
 }
