@@ -1,6 +1,5 @@
 import { intersectionObserver } from "../../../utils/observer.js";
-
-const MARGIN = 16;
+import { MARGIN, getList, y } from "../../../utils/virtual-list-helpers.js";
 
 const getObservers = () => [
   document.getElementById("top-observer"),
@@ -24,6 +23,8 @@ function y(element, value = undefined) {
     element.setAttribute("data-y", value);
   }
   return element.getAttribute("data-y");
+function getContainer() {
+  return document.getElementById("container");
 }
 
 export class VirtualList {
