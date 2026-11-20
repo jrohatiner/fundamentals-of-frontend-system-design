@@ -11,10 +11,6 @@ function getList() {
     return document.getElementById('virtual-list');
 }
 
-function getContainer() {
-    return document.getElementById('container');
-}
-
 /**
  * Returns `data-y` attribute of the HTMLElement, if value is provided
  * additionally updates the attribute
