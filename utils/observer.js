@@ -29,7 +29,7 @@ export function intersectionObserver(
     callback,
     config
 ) {
-    const observerInit = Object.assign({}, defaultObserverConfig, config ?? {});
+    const observerInit = { ...defaultObserverConfig, ...config };
     const observer = new IntersectionObserver(callback, observerInit);
     if (Array.isArray(target) || (target && typeof target === 'object' && typeof target[Symbol.iterator] === 'function')) {
         for (const t of target) {

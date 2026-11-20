@@ -129,10 +129,7 @@ export class VirtualList {
                 this.pool.slice(this.props.pageSize, this.pool.length),
                 this.pool.slice(0, this.props.pageSize)
             ];
-            this.pool = [].concat(
-                unchanged,
-                recycled
-            );
+            this.pool = [...unchanged, ...recycled];
             this.#updateData(recycled, data)
             this.start++;
         }
@@ -150,10 +147,7 @@ export class VirtualList {
             this.pool.slice(this.props.pageSize, this.pool.length),
             this.pool.slice(0, this.props.pageSize)
         ];
-        this.pool = [].concat(
-            recycled,
-            unchanged
-        );
+        this.pool = [...recycled, ...unchanged];
         this.#updateElement("up");
         this.#updateData(recycled, data);
         this.end--;
