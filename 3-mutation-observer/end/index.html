@@ -41,6 +41,11 @@
 
     const mutationObserver = new MutationObserver((mutations) => {
         for (const {target, type} of mutations) {
+            const contentContainer = target?.parentElement?.closest('.card__body__content');
+            if (
+                type === 'characterData' &&
+                contentContainer?.isContentEditable &&
+                target.parentElement?.isContentEditable &&
             if (
                 type === 'characterData' &&
                 SUPPORTED_ELEMENTS.has(target?.textContent)
@@ -50,6 +55,8 @@
                 element.focus();
             }
         }
+    });
+    mutationObserver.observe(list, { characterData: true, subtree: true });
     })
 
     let page = 0;
