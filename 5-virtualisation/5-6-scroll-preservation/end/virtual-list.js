@@ -29,20 +29,6 @@ function adjustWindowScroll(scrollDelta) {
   }
 }
 
-/**
- * Returns `data-y` attribute of the HTMLElement, if value is provided
- * additionally updates the attribute
- *
- * @param element {HTMLElement}
- * @param value {string | number}
- * @returns {?string}
- */
-function y(element, value = undefined) {
-  if (value != null) {
-    element.setAttribute("data-y", value);
-  }
-}
-
 export class VirtualList {
   #hasMore = true;
   #isLoading = false;
@@ -117,18 +103,22 @@ export class VirtualList {
    */
   #handleIntersection() {
     return (entries) => {
-      if (this.#isLoading) {
+      if (this.#isLoading || this.isLoading) {
         return;
       }
       for (const entry of entries) {
-        if (this.#isLoading) {
+        if (this.#isLoading || this.isLoading) {
           return;
         }
         if (entry.isIntersecting) {
           const id = entry.target.id;
           if (id === "top-observer" && this.start > 0) {
             void this.#handleTopObserver().catch(() => {});
-          } else if (id === "bottom-observer" && this.#hasMore) {
+          } else if (
+            id === "bottom-observer" &&
+            this.#hasMore &&
+            this.hasMore
+          ) {
             void this.#handleBottomObserver().catch(() => {});
           }
         }
@@ -155,7 +145,12 @@ export class VirtualList {
         window.removeEventListener("scroll", this.#onScroll);
       }
       this.#onScroll = () => {
-        if (this.start > 0 && !this.#isLoading && this.pool.length > 0) {
+        if (
+          this.start > 0 &&
+          !this.#isLoading &&
+          !this.isLoading &&
+          this.pool.length > 0
+        ) {
           const topY = +(y(this.pool[0]) ?? 0);
           if ((window.scrollY ?? 0) < topY) {
             void this.#handleTopObserver().catch(() => {});
@@ -171,10 +166,11 @@ export class VirtualList {
    * @returns Promise<void>
    */
   async #handleBottomObserver() {
-    if (!this.#hasMore || this.#isLoading) {
+    if (!this.#hasMore || !this.hasMore || this.#isLoading || this.isLoading) {
       return;
     }
     this.#isLoading = true;
+    this.isLoading = true;
     try {
       const container = getContainer();
       const list = getList();
@@ -211,13 +207,13 @@ export class VirtualList {
         ];
         this.#blurActiveInRecycled(recycled);
         this.pool = [...unchanged, ...recycled];
-        this.pool = [].concat(unchanged, recycled);
         this.#updateData(recycled, data);
         this.start++;
       }
       this.#updateElement("down");
       syncContainerHeight(container);
     } finally {
+      this.isLoading = false;
       this.#isLoading = false;
     }
   }
@@ -227,10 +223,11 @@ export class VirtualList {
    * @returns Promise<void>
    */
   async #handleTopObserver() {
-    if (this.start <= 0 || this.#isLoading) {
+    if (this.start <= 0 || this.#isLoading || this.isLoading) {
       return;
     }
     this.#isLoading = true;
+    this.isLoading = true;
     try {
       const container = getContainer();
       const data = await this.props.getPage(this.start - 1);
@@ -249,7 +246,6 @@ export class VirtualList {
       ];
       this.#blurActiveInRecycled(recycled);
       this.pool = [...recycled, ...unchanged];
-      this.pool = [].concat(recycled, unchanged);
       this.#updateData(recycled, data);
       const { anchorDelta, topY } = this.#updateElement("up", recycleCount);
       this.end--;
@@ -279,6 +275,7 @@ export class VirtualList {
         syncContainerHeight(container);
       }
     } finally {
+      this.isLoading = false;
       this.#isLoading = false;
     }
   }
