@@ -151,12 +151,15 @@ async function launchHeadlessChrome() {
 
     async function cleanup() {
         try {
+            await send('Browser.close');
+        } catch {}
+        try {
             ws.close();
         } catch {}
         if (proc.exitCode === null) {
             proc.kill('SIGTERM');
             await Promise.race([
-                new Promise((resolve) => proc.once('exit', resolve)),
+                new Promise((resolve) => proc.once('close', resolve)),
                 new Promise((resolve) =>
                     setTimeout(() => {
                         if (proc.exitCode === null) {
@@ -167,7 +170,14 @@ async function launchHeadlessChrome() {
                 ),
             ]);
         }
-        rmSync(userDataDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+        for (let attempt = 0; attempt < 10; attempt++) {
+            try {
+                rmSync(userDataDir, { recursive: true, force: true });
+                break;
+            } catch {
+                await new Promise((resolve) => setTimeout(resolve, 100));
+            }
+        }
     }
 
     return { send, evaluate, cleanup };
@@ -317,6 +327,38 @@ test('hides sentinels from assistive technology trees and announces feed paginat
     assert.deepEqual(await chrome.evaluate(`window.__statusHistory`), [
         'Loading more items...',
         'Loaded 10 items.',
+        '',
+    ]);
+
+    // Scroll through remaining pages 1..9 (up to 100 cards) and verify exhaustion handling
+    for (let pageIdx = 1; pageIdx < 10; pageIdx++) {
+        const expectedCount = (pageIdx + 1) * 10;
+        await chrome.evaluate(`document.getElementById('bottom-observer').scrollIntoView()`);
+        await waitForCondition(
+            chrome.evaluate,
+            `document.querySelectorAll('#list .card').length === ${expectedCount}`
+        );
+    }
+    await chrome.evaluate(`
+        window.__statusHistory = [];
+        document.getElementById('bottom-observer').scrollIntoView();
+    `);
+    await waitForCondition(
+        chrome.evaluate,
+        `document.getElementById('bottom-observer')?.textContent.trim() === 'No more items to load'`
+    );
+    assert.equal(
+        await chrome.evaluate(`document.querySelector('#container [role="status"]').textContent`),
+        'No more items to load.'
+    );
+    await assertSentinelsHiddenAndStatusLiveInAXTree(chrome, ['bottom-observer']);
+    await waitForCondition(
+        chrome.evaluate,
+        `document.querySelector('#container [role="status"]').textContent === ''`
+    );
+    assert.deepEqual(await chrome.evaluate(`window.__statusHistory`), [
+        'Loading more items...',
+        'No more items to load.',
         '',
     ]);
 

@@ -50,7 +50,7 @@
      * 5. Append fragment to "list" container
      */
     let page = 0;
-    let pendingLoads = 0;
+    let isLoading = false;
     let clearStatusTimer = null;
 
     function updateStatus(message) {
@@ -73,23 +73,23 @@
         }
         clearStatusTimer = setTimeout(() => {
             clearStatusTimer = null;
-            if (pendingLoads === 0) {
+            if (!isLoading) {
                 statusElement.textContent = "";
             }
         }, delayMs);
     }
 
     const observer = new IntersectionObserver(async ([entry]) => {
-        if(entry.isIntersecting) {
-            pendingLoads++;
+        if (entry.isIntersecting && !isLoading) {
+            isLoading = true;
             updateStatus("Loading more items...");
             try {
                 const data = await db.getPage(page++);
                 if (!data?.length) {
-                    pendingLoads--;
-                    if (pendingLoads === 0) {
-                        updateStatus("");
-                    }
+                    observer.unobserve(observerElement);
+                    observerElement.textContent = "No more items to load";
+                    updateStatus("No more items to load.");
+                    scheduleStatusClear();
                     return;
                 }
                 const fragment = new DocumentFragment();
@@ -98,21 +98,13 @@
                     fragment.appendChild(card);
                 });
                 list.appendChild(fragment);
-                pendingLoads--;
-                updateStatus(
-                    pendingLoads > 0
-                        ? `Loaded ${data.length} items. Loading more items...`
-                        : `Loaded ${data.length} items.`
-                );
-                if (pendingLoads === 0) {
-                    scheduleStatusClear();
-                }
+                updateStatus(`Loaded ${data.length} items.`);
+                scheduleStatusClear();
             } catch (error) {
-                pendingLoads = Math.max(0, pendingLoads - 1);
-                if (pendingLoads === 0) {
-                    updateStatus("");
-                }
+                updateStatus("");
                 throw error;
+            } finally {
+                isLoading = false;
             }
         }
     }, {
