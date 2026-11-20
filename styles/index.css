@@ -32,7 +32,12 @@
     padding: 0 1rem;
 }
 
-#bottom-observer {
+[data-placeholder]:empty::before {
+    content: attr(data-placeholder);
+    color: #757575;
+    pointer-events: none;
+}
+
 #top-observer {
     background: rgba(0, 0, 255, 0.2);
     border: 2px dashed  rgba(0, 0, 255, 0.2);
@@ -48,7 +53,5 @@
     flex-direction: column;
     justify-content: center;
     align-items: center;
-    background: rgba(255, 0, 0, 0.2);
-    border: 2px dashed  rgba(255, 0, 0, 0.6);
     margin: 0 2rem;
 }
