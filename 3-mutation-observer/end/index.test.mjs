@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync } from 'node:fs';
+import { rm } from 'node:fs/promises';
 import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
@@ -75,7 +76,7 @@ async function launchHeadlessChrome() {
             '--remote-debugging-port=0',
             'about:blank',
         ],
-        { stdio: ['ignore', 'ignore', 'pipe'] }
+        { stdio: ['ignore', 'ignore', 'pipe'], detached: true }
     );
 
     const debugPort = await new Promise((resolve, reject) => {
@@ -154,10 +155,14 @@ async function launchHeadlessChrome() {
             ws.close();
         } catch {}
         if (proc.exitCode === null) {
-            proc.kill('SIGKILL');
+            try {
+                process.kill(-proc.pid, 'SIGKILL');
+            } catch {
+                proc.kill('SIGKILL');
+            }
             await new Promise((resolve) => proc.once('exit', resolve));
         }
-        rmSync(userDataDir, { recursive: true, force: true });
+        await rm(userDataDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
     }
 
     return { send, evaluate, cleanup };
@@ -300,7 +305,7 @@ test('delegates MutationObserver to #list across pagination and converts heading
     `);
     assert.deepEqual(card0Heading, {
         tagName: 'H1',
-        textContent: 'Heading',
+        textContent: '',
         contentEditable: 'true',
         focusCalledOnHeading: true,
     });
@@ -336,9 +341,9 @@ test('delegates MutationObserver to #list across pagination and converts heading
     assert.deepEqual(paginatedHeadings, {
         h2Count: 1,
         h2Tag: 'H2',
-        h2Text: 'Heading',
+        h2Text: '',
         h3Tag: 'H3',
-        h3Text: 'Heading',
+        h3Text: '',
         focusCalledOnH2: true,
         lastFocusedIsH3: true,
     });
@@ -386,5 +391,223 @@ test('delegates MutationObserver to #list across pagination and converts heading
         nonEditableChildH1: false,
         nonEditableChildText: '/h1',
         strayStillTextNode: true,
+    });
+});
+
+test('matches heading command prefixes with or without trailing text, preserves content, renders CSS placeholders, and places caret inside heading', async (t) => {
+    const { server, baseUrl } = await startStaticServer(REPO_ROOT);
+    t.after(() => server.close());
+
+    const chrome = await launchHeadlessChrome();
+    t.after(async () => {
+        await chrome.cleanup();
+    });
+
+    await chrome.send('Page.enable');
+    await chrome.send('Runtime.enable');
+
+    await chrome.send('Page.navigate', {
+        url: `${baseUrl}/3-mutation-observer/end/index.html`,
+    });
+
+    await waitForCondition(chrome.evaluate, `document.querySelectorAll('#list .card').length === 10`);
+
+    // 1) Primary journey: /h1, /h2, /h3 with trailing text (space separator, nbsp, extra spaces, no space, multiline)
+    const trailingTextResults = await chrome.evaluate(`
+        new Promise((resolve) => {
+            const contents = document.querySelectorAll('#list .card .card__body__content');
+            contents[0].firstChild.data = '/h1 Project Overview';
+            contents[1].firstChild.data = '/h2\\u00a0Architecture & Design';
+            contents[2].firstChild.data = '/h3  Indented Note';
+            contents[3].firstChild.data = '/h2Quick Summary';
+            contents[4].firstChild.data = '/h3 Line One\\nLine Two';
+
+            queueMicrotask(() => {
+                const h1 = contents[0].querySelector('h1');
+                const h2Nbsp = contents[1].querySelector('h2');
+                const h3Indented = contents[2].querySelector('h3');
+                const h2NoSpace = contents[3].querySelector('h2');
+                const h3Multiline = contents[4].querySelector('h3');
+
+                resolve({
+                    h1Text: h1?.textContent,
+                    h1BeforeContent: h1 ? getComputedStyle(h1, '::before').content : null,
+                    h2NbspText: h2Nbsp?.textContent,
+                    h3IndentedText: h3Indented?.textContent,
+                    h2NoSpaceText: h2NoSpace?.textContent,
+                    h3MultilineText: h3Multiline?.textContent,
+                });
+            });
+        })
+    `);
+
+    assert.deepEqual(trailingTextResults, {
+        h1Text: 'Project Overview',
+        h1BeforeContent: 'none',
+        h2NbspText: 'Architecture & Design',
+        h3IndentedText: ' Indented Note',
+        h2NoSpaceText: 'Quick Summary',
+        h3MultilineText: 'Line One\nLine Two',
+    });
+
+    // 2) Real user typing at start of existing card content ("Learning to use Intersection Observer")
+    //    and continuing to type at the end of the preserved text.
+    await chrome.evaluate(`
+        (() => {
+            const content = document.querySelectorAll('#list .card .card__body__content')[5];
+            content.firstChild.data = ' Project Overview';
+            content.focus();
+            const range = document.createRange();
+            range.setStart(content.firstChild, 0);
+            range.collapse(true);
+            const selection = window.getSelection();
+            selection.removeAllRanges();
+            selection.addRange(range);
+        })();
+    `);
+    await chrome.send('Input.insertText', { text: '/' });
+    await chrome.send('Input.insertText', { text: 'h' });
+    await chrome.send('Input.insertText', { text: '1' });
+
+    await waitForCondition(
+        chrome.evaluate,
+        `Boolean(document.querySelectorAll('#list .card .card__body__content')[5].querySelector('h1'))`
+    );
+
+    const caretAfterTrailingConversion = await chrome.evaluate(`
+        (() => {
+            const content = document.querySelectorAll('#list .card .card__body__content')[5];
+            const h1 = content.querySelector('h1');
+            const selection = window.getSelection();
+            return {
+                textContent: h1?.textContent,
+                selectionInsideH1: Boolean(h1 && selection && h1.contains(selection.anchorNode)),
+                isCollapsed: selection?.isCollapsed,
+                anchorOffset: selection?.anchorOffset,
+                activeContainsH1: Boolean(document.activeElement?.contains(h1)),
+            };
+        })()
+    `);
+
+    assert.deepEqual(caretAfterTrailingConversion, {
+        textContent: 'Project Overview',
+        selectionInsideH1: true,
+        isCollapsed: true,
+        anchorOffset: 'Project Overview'.length,
+        activeContainsH1: true,
+    });
+
+    // Typing additional text appends at the end of "Project Overview"
+    await chrome.send('Input.insertText', { text: '!' });
+    const appendedText = await chrome.evaluate(`
+        document.querySelectorAll('#list .card .card__body__content')[5].querySelector('h1')?.textContent
+    `);
+    assert.equal(appendedText, 'Project Overview!');
+
+    // 3) Secondary journey: empty /h1, /h2, /h3 have empty textContent, zero child text nodes,
+    //    data-placeholder attribute, and visual CSS ::before pseudo-element placeholder.
+    const emptyHeadingResults = await chrome.evaluate(`
+        new Promise((resolve) => {
+            const contents = document.querySelectorAll('#list .card .card__body__content');
+            contents[6].firstChild.data = '/h1';
+            contents[7].firstChild.data = '/h2 ';
+            contents[8].firstChild.data = '/h3';
+
+            queueMicrotask(() => {
+                const h1 = contents[6].querySelector('h1');
+                const h2 = contents[7].querySelector('h2');
+                const h3 = contents[8].querySelector('h3');
+                const selection = window.getSelection();
+
+                resolve({
+                    h1: {
+                        textContent: h1?.textContent,
+                        childNodesLength: h1?.childNodes.length,
+                        placeholderAttr: h1?.getAttribute('data-placeholder'),
+                        beforeContent: h1 ? getComputedStyle(h1, '::before').content : null,
+                    },
+                    h2: {
+                        textContent: h2?.textContent,
+                        childNodesLength: h2?.childNodes.length,
+                        placeholderAttr: h2?.getAttribute('data-placeholder'),
+                        beforeContent: h2 ? getComputedStyle(h2, '::before').content : null,
+                    },
+                    h3: {
+                        textContent: h3?.textContent,
+                        childNodesLength: h3?.childNodes.length,
+                        placeholderAttr: h3?.getAttribute('data-placeholder'),
+                        beforeContent: h3 ? getComputedStyle(h3, '::before').content : null,
+                    },
+                    selectionInsideLastEmpty: Boolean(h3 && selection && (selection.anchorNode === h3 || h3.contains(selection.anchorNode))),
+                });
+            });
+        })
+    `);
+
+    assert.deepEqual(emptyHeadingResults, {
+        h1: {
+            textContent: '',
+            childNodesLength: 0,
+            placeholderAttr: 'Heading 1',
+            beforeContent: '"Heading 1"',
+        },
+        h2: {
+            textContent: '',
+            childNodesLength: 0,
+            placeholderAttr: 'Heading 2',
+            beforeContent: '"Heading 2"',
+        },
+        h3: {
+            textContent: '',
+            childNodesLength: 0,
+            placeholderAttr: 'Heading 3',
+            beforeContent: '"Heading 3"',
+        },
+        selectionInsideLastEmpty: true,
+    });
+
+    // Typing into the newly focused empty h3 inserts only the user's text (no dummy characters) and hides ::before
+    await chrome.send('Input.insertText', { text: 'Clean Heading' });
+    const typedIntoEmpty = await chrome.evaluate(`
+        (() => {
+            const h3 = document.querySelectorAll('#list .card .card__body__content')[8].querySelector('h3');
+            return {
+                textContent: h3?.textContent,
+                beforeContent: h3 ? getComputedStyle(h3, '::before').content : null,
+            };
+        })()
+    `);
+    assert.deepEqual(typedIntoEmpty, {
+        textContent: 'Clean Heading',
+        beforeContent: 'none',
+    });
+
+    // 4) Unsupported commands (/h4, /h0, /h10, /heading, mid-line /h1) remain unconverted text nodes
+    const unsupportedResults = await chrome.evaluate(`
+        new Promise((resolve) => {
+            const content = document.querySelectorAll('#list .card .card__body__content')[9];
+            const samples = ['/h4 Subheading', '/h0 Invalid', '/h10 Ten', '/heading', 'Intro /h1 Title'];
+            content.textContent = '';
+            const nodes = samples.map((sample) => {
+                const line = document.createElement('div');
+                const text = document.createTextNode('init');
+                line.appendChild(text);
+                content.appendChild(line);
+                text.data = sample;
+                return line;
+            });
+
+            queueMicrotask(() => {
+                resolve({
+                    headingsCreated: content.querySelectorAll('h1, h2, h3, h4').length,
+                    texts: nodes.map((line) => line.textContent),
+                });
+            });
+        })
+    `);
+
+    assert.deepEqual(unsupportedResults, {
+        headingsCreated: 0,
+        texts: ['/h4 Subheading', '/h0 Invalid', '/h10 Ten', '/heading', 'Intro /h1 Title'],
     });
 });

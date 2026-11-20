@@ -2,6 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Frontend System Design Fundamentals</title>
     <link rel="stylesheet" href="../../styles/index.css">
 </head>
@@ -34,6 +35,8 @@
         "This is a random body text"
     );
 
-    container.appendChild(component);
+    if (component) {
+        container.appendChild(component);
+    }
 </script>
 </html>
