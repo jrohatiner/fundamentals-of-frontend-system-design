@@ -185,41 +185,87 @@ export class VirtualList {
      * @return {void}
      */
     #updateElement(direction) {
+        if (this.pool.length === 0) {
+            return;
+        }
         const [topObserver, bottomObserver] = getObservers();
-        const start = direction === 'down' ? 0 : this.props.pageSize - 1;
+        const yValues = this.pool.map((el) => {
+            const currentY = y(el);
+            return currentY == null ? null : +currentY;
+        });
+        const shouldTransform = this.pool.map((el) => Boolean(el.style.transform));
+
+        const lastIndex = this.pool.length - 1;
+        const recycledStart = this.pool.length - this.props.pageSize;
+        const isPoolFull = this.pool.length >= this.poolLimit
+            && recycledStart > 0
+            && yValues[recycledStart - 1] != null;
+
+        const start = direction === 'down'
+            ? (isPoolFull ? recycledStart : 0)
+            : Math.min(this.props.pageSize - 1, lastIndex);
         const end = direction === 'down' ? this.pool.length : 0;
-        if(direction === 'down') {
-            for(let i = start; i < end; i++) {
-                const [prev, current] = [this.pool.at(i - 1), this.pool[i]];
-                if (y(prev) == null) {
-                    y(current, '0');
+
+        // Phase 1: Batch DOM geometry reads before any style or attribute mutations
+        const heights = new Array(this.pool.length);
+        if (direction === 'down') {
+            for (let i = Math.max(0, start - 1); i < end; i++) {
+                heights[i] = this.pool[i].getBoundingClientRect().height;
+            }
+        } else {
+            const measureEnd = Math.min(lastIndex, start + 1);
+            for (let i = Math.max(0, end + 1); i <= measureEnd; i++) {
+                heights[i] = this.pool[i].getBoundingClientRect().height;
+            }
+        }
+        if (heights[lastIndex] === undefined) {
+            heights[lastIndex] = this.pool[lastIndex].getBoundingClientRect().height;
+        }
+
+        // Phase 2: Compute target vertical positions in memory
+        if (direction === 'down') {
+            for (let i = start; i < end; i++) {
+                if (i === 0 || yValues[i - 1] == null) {
+                    yValues[i] = 0;
                 } else {
-                    const previousY = +y(prev);
-                    const previousHeight = prev.getBoundingClientRect().height;
-                    const yPos = previousY + (previousHeight + 2 * MARGIN)
-                    y(current, yPos)
+                    yValues[i] = yValues[i - 1] + (heights[i - 1] + 2 * MARGIN);
+                    shouldTransform[i] = true;
+                }
+            }
+        } else {
+            for (let i = start; i >= end; i--) {
+                if (i + 1 >= this.pool.length || yValues[i + 1] == null) {
+                    yValues[i] = 0;
+                } else {
+                    yValues[i] = Math.max(0, yValues[i + 1] - (heights[i + 1] + 2 * MARGIN));
+                    shouldTransform[i] = true;
+                }
+            }
+        }
+
+        // Phase 3: Batch DOM attribute and transform writes
+        if (direction === 'down') {
+            for (let i = start; i < end; i++) {
+                const current = this.pool[i];
+                const yPos = yValues[i];
+                y(current, yPos);
+                if (shouldTransform[i]) {
                     current.style.transform = `translateY(${yPos}px)`;
                 }
             }
         } else {
-            for(let i = start; i >= end; i--) {
-                const [prev, current] = [this.pool.at(i + 1), this.pool[i]];
-                if (y(prev) == null) {
-                    y(current, '0');
-                } else {
-                    const previousY = +y(prev);
-                    const previousHeight = prev.getBoundingClientRect().height;
-                    const yPos = previousY - (previousHeight + 2 * MARGIN)
-                    y(current, yPos)
+            for (let i = start; i >= end; i--) {
+                const current = this.pool[i];
+                const yPos = yValues[i];
+                y(current, yPos);
+                if (shouldTransform[i]) {
                     current.style.transform = `translateY(${yPos}px)`;
                 }
             }
         }
-        topObserver.style.transform = `translateY(${+y(this.pool[0])}px)`;
-        const lastElement = this.pool.at(-1);
-        const bottomObserverY = +lastElement.getAttribute('data-y')
-            + lastElement.getBoundingClientRect().height
-            + MARGIN * 2;
+
+        topObserver.style.transform = `translateY(${yValues[0]}px)`;
+        const bottomObserverY = yValues[lastIndex] + heights[lastIndex] + MARGIN * 2;
         bottomObserver.style.transform = `translateY(${bottomObserverY}px)`;
     }
 
