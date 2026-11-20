@@ -49,6 +49,7 @@ Run all validation commands from the repository root. These commands execute in 
 - Consecutive pushes to an open pull request automatically cancel superseded in-progress workflow runs.
 - Preserve the zero-bundler workshop design: exercises in `begin/` and `end/` directories must continue to work directly in modern browsers using standard ES modules.
 - Always verify `npm run validate` exits with code `0` and leaves `git status` clean before opening or updating a pull request.
+
 # Contributor and Agent Guide (`AGENTS.md`)
 
 ## Repository Overview
@@ -118,6 +119,7 @@ Execute the Node.js unit test suites using the built-in test runner:
 ```bash
 node --test 5-virtualisation/5-6-scroll-preservation/end/virtual-list.test.js 5-virtualisation/5-6-scroll-preservation/end/virtual-list.test.mjs
 ```
+
 # AGENTS.md
 
 ## Repository Overview
