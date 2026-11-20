@@ -418,6 +418,248 @@ describe("VirtualList.#updateElement layout batching and scoped positioning", ()
     });
 });
 
+describe("VirtualList terminal boundary guard", () => {
+    it("halts pagination cleanly without throwing TypeError when scrolling past page index 9", async () => {
+        const env = createDOMEnvironment({ heightForDatum: () => 200 });
+        const requestedPages = [];
+
+        // Mirror utils/db.js: 100 entries across 10 pages (indices 0..9), returning [] past index 9
+        const dbPages = Array.from({ length: 10 }, (_, pageIndex) =>
+            Array.from({ length: 10 }, (__, itemOffset) => {
+                const index = pageIndex * 10 + itemOffset;
+                return {
+                    title: `[Entry ${index}] - Frontend System Design`,
+                    body: `[Entry ${index}] - Frontend System Design`,
+                };
+            })
+        );
+
+        // Mirror index.html updateTemplate which throws TypeError if datum is undefined
+        const strictCreateCard = (datum) => {
+            const card = env.createCard(datum);
+            card.titleText = datum.title;
+            card.bodyText = datum.body;
+            return card;
+        };
+        const strictUpdateCard = (card, datum) => {
+            // Accessing datum.title / datum.body throws TypeError if datum is undefined
+            [card.titleText, card.bodyText] = [datum.title, datum.body];
+            env.updateCard(card, datum);
+        };
+
+        const list = new VirtualList(globalThis.document.body, {
+            getPage: async (page) => {
+                requestedPages.push(page);
+                return page < 0 || page > dbPages.length - 1 ? [] : dbPages[page];
+            },
+            getTemplate: strictCreateCard,
+            updateTemplate: strictUpdateCard,
+            pageSize: 10,
+        });
+        list.render();
+
+        // Scroll through pages 0..9 (10 valid pages)
+        for (let page = 0; page <= 9; page++) {
+            await env.triggerScroll("down");
+        }
+
+        assert.equal(list.start, 8);
+        assert.equal(list.end, 10);
+        assert.deepEqual(
+            list.pool.map((el) => el.titleText),
+            Array.from({ length: 20 }, (_, i) => `[Entry ${80 + i}] - Frontend System Design`)
+        );
+
+        // Scroll past page index 9: page 10 returns [], setting #hasMore = false
+        await assert.doesNotReject(() => env.triggerScroll("down"));
+        assert.equal(list.start, 8);
+        assert.equal(list.end, 10);
+        assert.deepEqual(requestedPages, [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+
+        // Subsequent bottom intersections must be suppressed without calling getPage again
+        await env.triggerScroll("down");
+        await env.triggerScroll("down");
+        assert.deepEqual(
+            requestedPages,
+            [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
+            "getPage must not be called after terminal boundary is reached"
+        );
+        assert.deepEqual(
+            list.pool.map((el) => el.titleText),
+            Array.from({ length: 20 }, (_, i) => `[Entry ${80 + i}] - Frontend System Design`)
+        );
+
+        // Scrolling back up re-enables forward pagination for unloaded valid pages
+        await env.triggerScroll("up");
+        assert.equal(list.start, 7);
+        assert.equal(list.end, 9);
+        assert.deepEqual(
+            list.pool.map((el) => el.titleText),
+            Array.from({ length: 20 }, (_, i) => `[Entry ${70 + i}] - Frontend System Design`)
+        );
+
+        await env.triggerScroll("down");
+        assert.equal(list.start, 8);
+        assert.equal(list.end, 10);
+        assert.deepEqual(
+            list.pool.map((el) => el.titleText),
+            Array.from({ length: 20 }, (_, i) => `[Entry ${80 + i}] - Frontend System Design`)
+        );
+    });
+
+    it("exits early before recycling elements when a page shorter than pageSize is returned", async () => {
+        const env = createDOMEnvironment({ heightForDatum: () => 200 });
+        const requestedPages = [];
+        let updateCalls = 0;
+
+        // 25 items total with pageSize = 10: pages 0 and 1 have 10 items, page 2 has 5 items
+        const partialPages = [
+            Array.from({ length: 10 }, (_, i) => ({ title: `Entry ${i}`, body: `Body ${i}` })),
+            Array.from({ length: 10 }, (_, i) => ({ title: `Entry ${10 + i}`, body: `Body ${10 + i}` })),
+            Array.from({ length: 5 }, (_, i) => ({ title: `Entry ${20 + i}`, body: `Body ${20 + i}` })),
+        ];
+
+        const list = new VirtualList(globalThis.document.body, {
+            getPage: async (page) => {
+                requestedPages.push(page);
+                return partialPages[page] ?? [];
+            },
+            getTemplate: (datum) => {
+                const card = env.createCard(datum);
+                card.titleText = datum.title;
+                return card;
+            },
+            updateTemplate: (card, datum) => {
+                updateCalls++;
+                card.titleText = datum.title;
+                env.updateCard(card, datum);
+            },
+            pageSize: 10,
+        });
+        list.render();
+
+        await env.triggerScroll("down"); // page 0 (10)
+        await env.triggerScroll("down"); // page 1 (10) -> pool reaches poolLimit (20)
+        const snapshotBeforePartial = list.pool.map((el) => el.titleText);
+
+        // Page 2 returns 5 items (< pageSize 10): must halt before recycling elements
+        await env.triggerScroll("down");
+        assert.equal(updateCalls, 0, "Should not recycle elements on short trailing page when pool is full");
+        assert.equal(list.start, 0);
+        assert.equal(list.end, 2);
+        assert.deepEqual(list.pool.map((el) => el.titleText), snapshotBeforePartial);
+
+        // Further bottom observer events must not trigger additional fetches
+        await env.triggerScroll("down");
+        assert.deepEqual(requestedPages, [0, 1, 2]);
+    });
+
+    it("renders datasets with fewer items than poolLimit without errors and halts pagination", async () => {
+        // Subcase 1: 5 items (< pageSize 10 and < poolLimit 20)
+        const envSmall = createDOMEnvironment({ heightForDatum: () => 200 });
+        const smallRequested = [];
+        const smallData = [Array.from({ length: 5 }, (_, i) => ({ title: `Small ${i}`, body: `Body ${i}` }))];
+
+        const smallList = new VirtualList(globalThis.document.body, {
+            getPage: async (page) => {
+                smallRequested.push(page);
+                return smallData[page] ?? [];
+            },
+            getTemplate: (datum) => {
+                const card = envSmall.createCard(datum);
+                card.titleText = datum.title;
+                return card;
+            },
+            updateTemplate: (card, datum) => {
+                card.titleText = datum.title;
+            },
+            pageSize: 10,
+        });
+        smallList.render();
+
+        await envSmall.triggerScroll("down");
+        assert.equal(smallList.pool.length, 5);
+        assert.deepEqual(
+            smallList.pool.map((el) => el.titleText),
+            ["Small 0", "Small 1", "Small 2", "Small 3", "Small 4"]
+        );
+
+        // Subsequent scroll attempts do not fetch page 1 because page 0 was shorter than pageSize
+        await envSmall.triggerScroll("down");
+        assert.deepEqual(smallRequested, [0]);
+
+        // Subcase 2: 15 items (page 0 has 10, page 1 has 5; total 15 < poolLimit 20)
+        const envMedium = createDOMEnvironment({ heightForDatum: () => 200 });
+        const mediumRequested = [];
+        const mediumData = [
+            Array.from({ length: 10 }, (_, i) => ({ title: `Med ${i}`, body: `Body ${i}` })),
+            Array.from({ length: 5 }, (_, i) => ({ title: `Med ${10 + i}`, body: `Body ${10 + i}` })),
+        ];
+
+        const mediumList = new VirtualList(globalThis.document.body, {
+            getPage: async (page) => {
+                mediumRequested.push(page);
+                return mediumData[page] ?? [];
+            },
+            getTemplate: (datum) => {
+                const card = envMedium.createCard(datum);
+                card.titleText = datum.title;
+                return card;
+            },
+            updateTemplate: (card, datum) => {
+                card.titleText = datum.title;
+            },
+            pageSize: 10,
+        });
+        mediumList.render();
+
+        await envMedium.triggerScroll("down"); // page 0 (10)
+        await envMedium.triggerScroll("down"); // page 1 (5) -> total 15 < poolLimit 20
+        assert.equal(mediumList.pool.length, 15);
+        assert.deepEqual(
+            mediumList.pool.map((el) => el.titleText),
+            Array.from({ length: 15 }, (_, i) => `Med ${i}`)
+        );
+
+        await envMedium.triggerScroll("down");
+        assert.deepEqual(mediumRequested, [0, 1]);
+    });
+
+    it("guards updateTemplate against undefined entries in data batches", async () => {
+        const env = createDOMEnvironment({ heightForDatum: () => 200 });
+        const seenData = [];
+
+        const sparsePages = [
+            Array.from({ length: 4 }, (_, i) => ({ title: `P0-${i}`, body: `B0-${i}` })),
+            Array.from({ length: 4 }, (_, i) => ({ title: `P1-${i}`, body: `B1-${i}` })),
+            [{ title: "P2-0", body: "B2-0" }, undefined, { title: "P2-2", body: "B2-2" }, undefined],
+        ];
+
+        const list = new VirtualList(globalThis.document.body, {
+            getPage: async (page) => sparsePages[page] ?? [],
+            getTemplate: (datum) => {
+                const card = env.createCard(datum);
+                card.titleText = datum.title;
+                return card;
+            },
+            updateTemplate: (card, datum) => {
+                seenData.push(datum);
+                card.titleText = datum.title;
+                env.updateCard(card, datum);
+            },
+            pageSize: 4,
+        });
+        list.render();
+
+        await env.triggerScroll("down"); // page 0
+        await env.triggerScroll("down"); // page 1 (pool reaches 8)
+        await assert.doesNotReject(() => env.triggerScroll("down")); // page 2 (length 4 with undefined holes)
+
+        assert.equal(seenData.length, 2, "updateTemplate must only be called for defined data items");
+        assert.ok(seenData.every((d) => d !== undefined));
+    });
+});
+
 class BoundaryMockDocumentFragment {
     constructor() {
         this.children = [];
