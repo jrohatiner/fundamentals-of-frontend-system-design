@@ -4,15 +4,13 @@ import {
 } from "../../../utils/observer.js";
 
 const MARGIN = 16;
+import { intersectionObserver } from "../../../utils/observer.js";
+import { MARGIN, getList, y } from "../../../utils/virtual-list-helpers.js";
 
 const getObservers = () => [
   document.getElementById("top-observer"),
   document.getElementById("bottom-observer"),
 ];
-
-function getList() {
-  return document.getElementById("virtual-list");
-}
 
 function getContainer() {
   return document.getElementById("container");
@@ -29,6 +27,11 @@ function syncContainerHeight(container) {
   container.style.height = nextHeight;
   container.style.minHeight = nextHeight;
   return scrollHeight;
+  if (!container) {
+    return;
+  }
+  container.style.height = "";
+  container.style.height = `${container.scrollHeight}px`;
 }
 
 function adjustWindowScroll(scrollDelta) {
@@ -85,7 +88,6 @@ function y(element, value = undefined) {
   if (value != null) {
     element.setAttribute("data-y", value);
   }
-  return element.getAttribute("data-y");
 }
 
 export class VirtualList {
@@ -396,6 +398,7 @@ export class VirtualList {
           this.pool.slice(0, this.props.pageSize),
         ];
         this.#blurActiveInRecycled(recycled);
+        this.pool = [...unchanged, ...recycled];
         this.pool = [].concat(unchanged, recycled);
         this.#updateData(recycled, data);
         this.start++;
@@ -405,6 +408,7 @@ export class VirtualList {
       if (syncedHeight > 0) {
         this.#minContainerHeight = syncedHeight;
       }
+      syncContainerHeight(container);
     } finally {
       this.#isLoading = false;
     }
@@ -436,6 +440,7 @@ export class VirtualList {
         this.pool.slice(0, this.pool.length - recycleCount),
       ];
       this.#blurActiveInRecycled(recycled);
+      this.pool = [...recycled, ...unchanged];
       this.pool = [].concat(recycled, unchanged);
       this.#updateData(recycled, data);
       const { anchorDelta, topY } = this.#updateElement("up", recycleCount);
@@ -456,6 +461,7 @@ export class VirtualList {
         const scrollDelta = targetScrollY - currentScrollY;
         if (scrollDelta > 0) {
           syncedHeight = syncContainerHeight(container);
+          syncContainerHeight(container);
           adjustWindowScroll(scrollDelta);
         } else {
           if (scrollDelta < 0) {
@@ -468,6 +474,10 @@ export class VirtualList {
       }
       if (syncedHeight > 0) {
         this.#minContainerHeight = syncedHeight;
+          syncContainerHeight(container);
+        }
+      } else {
+        syncContainerHeight(container);
       }
     } finally {
       this.#isLoading = false;
@@ -559,6 +569,7 @@ export class VirtualList {
           inlineSize: rect.width,
           blockSize: rect.height,
         });
+        heights[i] = this.pool[i].getBoundingClientRect().height;
       }
     }
     if (heights[lastIndex] === undefined) {
@@ -595,6 +606,7 @@ export class VirtualList {
     } else {
       for (let i = end; i <= start; i++) {
         prependedHeight += heights[i] + verticalMargin;
+        prependedHeight += heights[i] + 2 * MARGIN;
       }
       const anchorIndex = start + 1;
       const hasAnchor =
@@ -611,6 +623,7 @@ export class VirtualList {
       }
       for (let i = end + 1; i <= start; i++) {
         yValues[i] = yValues[i - 1] + (heights[i - 1] + verticalMargin);
+        yValues[i] = yValues[i - 1] + (heights[i - 1] + 2 * MARGIN);
         shouldTransform[i] = true;
       }
 

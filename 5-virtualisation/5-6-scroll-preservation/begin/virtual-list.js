@@ -4,6 +4,8 @@ import {
 } from "../../../utils/observer.js";
 
 const MARGIN = 16;
+import { intersectionObserver } from "../../../utils/observer.js";
+import { MARGIN, getList, y } from "../../../utils/virtual-list-helpers.js";
 
 const getObservers = () => [
   document.getElementById("top-observer"),
@@ -12,10 +14,6 @@ const getObservers = () => [
 
 function getList() {
   return document.getElementById("virtual-list");
-}
-
-function getContainer() {
-  return document.getElementById("container");
 }
 
 /**
@@ -62,6 +60,8 @@ function y(element, value = undefined) {
     element.setAttribute("data-y", value);
   }
   return element.getAttribute("data-y");
+function getContainer() {
+  return document.getElementById("container");
 }
 
 export class VirtualList {
@@ -278,7 +278,7 @@ export class VirtualList {
         this.pool.slice(this.props.pageSize, this.pool.length),
         this.pool.slice(0, this.props.pageSize),
       ];
-      this.pool = [].concat(unchanged, recycled);
+      this.pool = [...unchanged, ...recycled];
       this.#updateData(recycled, data);
       this.start++;
     }
@@ -296,6 +296,8 @@ export class VirtualList {
       this.pool.slice(0, this.props.pageSize),
     ];
     this.pool = [].concat(recycled, unchanged);
+    this.pool = [...recycled, ...unchanged];
+    this.#updateElement("up");
     this.#updateData(recycled, data);
     this.#updateElement("up");
     this.end--;

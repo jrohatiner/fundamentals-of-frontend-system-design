@@ -57,7 +57,7 @@ function normalizeTargets(target) {
  * @return {IntersectionObserver}
  */
 export function intersectionObserver(target, callback, config) {
-  const observerInit = Object.assign({}, defaultObserverConfig, config ?? {});
+  const observerInit = { ...defaultObserverConfig, ...config };
   const observer = new IntersectionObserver(callback, observerInit);
   const targets = normalizeTargets(target);
   for (const candidate of targets) {
