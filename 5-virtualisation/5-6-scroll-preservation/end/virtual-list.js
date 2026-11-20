@@ -50,8 +50,25 @@ function y(element, value = undefined) {
 }
 
 export class VirtualList {
+    #hasMore = true;
     #isLoading = false;
     #onScroll = null;
+
+    get hasMore() {
+        return this.#hasMore;
+    }
+
+    set hasMore(value) {
+        this.#hasMore = Boolean(value);
+    }
+
+    get isLoading() {
+        return this.#isLoading;
+    }
+
+    set isLoading(value) {
+        this.#isLoading = Boolean(value);
+    }
 
     /**
      * @param root {HTMLElement}
@@ -69,10 +86,9 @@ export class VirtualList {
         this.root = root;
         this.pool = [];
         this.poolLimit = this.props.pageSize * 2;
-        this.hasMore = true;
-        this.isLoading = false;
-        this.observer = null;
+        this.#hasMore = true;
         this.#isLoading = false;
+        this.observer = null;
     }
 
     /**
@@ -107,18 +123,18 @@ export class VirtualList {
      */
     #handleIntersection() {
         return (entries) => {
-            if (this.#isLoading || this.isLoading) {
+            if (this.#isLoading) {
                 return;
             }
             for (const entry of entries) {
-                if (this.#isLoading || this.isLoading) {
+                if (this.#isLoading) {
                     return;
                 }
                 if (entry.isIntersecting) {
                     const id = entry.target.id;
                     if (id === 'top-observer' && this.start > 0) {
                         void this.#handleTopObserver().catch(() => {});
-                    } else if (id === 'bottom-observer' && this.hasMore) {
+                    } else if (id === 'bottom-observer' && this.#hasMore) {
                         void this.#handleBottomObserver().catch(() => {});
                     }
                 }
@@ -142,7 +158,7 @@ export class VirtualList {
                 window.removeEventListener('scroll', this.#onScroll);
             }
             this.#onScroll = () => {
-                if (this.start > 0 && !this.#isLoading && !this.isLoading && this.pool.length > 0) {
+                if (this.start > 0 && !this.#isLoading && this.pool.length > 0) {
                     const topY = +(y(this.pool[0]) ?? 0);
                     if ((window.scrollY ?? 0) < topY) {
                         void this.#handleTopObserver().catch(() => {});
@@ -158,22 +174,31 @@ export class VirtualList {
      * @returns Promise<void>
      */
     async #handleBottomObserver() {
-        if (this.#isLoading || this.isLoading || !this.hasMore) {
+        if (!this.#hasMore || this.#isLoading) {
             return;
         }
         this.#isLoading = true;
-        this.isLoading = true;
         try {
             const container = getContainer();
             const list = getList();
             const data = await this.props.getPage(this.end);
             if (!Array.isArray(data) || data.length === 0) {
-                this.hasMore = false;
+                this.#hasMore = false;
                 const [, bottomObserver] = getObservers();
                 if (bottomObserver) {
                     this.observer?.unobserve?.(bottomObserver);
                 }
                 return;
+            }
+            if (data.length < this.props.pageSize) {
+                this.#hasMore = false;
+                const [, bottomObserver] = getObservers();
+                if (bottomObserver) {
+                    this.observer?.unobserve?.(bottomObserver);
+                }
+                if (this.pool.length >= this.poolLimit) {
+                    return;
+                }
             }
             this.end++;
             if (this.pool.length < this.poolLimit) {
@@ -198,7 +223,6 @@ export class VirtualList {
             syncContainerHeight(container);
         } finally {
             this.#isLoading = false;
-            this.isLoading = false;
         }
     }
 
@@ -207,11 +231,10 @@ export class VirtualList {
      * @returns Promise<void>
      */
     async #handleTopObserver() {
-        if (this.#isLoading || this.isLoading || this.start <= 0) {
+        if (this.start <= 0 || this.#isLoading) {
             return;
         }
         this.#isLoading = true;
-        this.isLoading = true;
         try {
             const container = getContainer();
             const data = await this.props.getPage(this.start - 1);
@@ -231,8 +254,9 @@ export class VirtualList {
             this.#updateData(recycled, data);
             const { anchorDelta, topY } = this.#updateElement("up", recycleCount);
             this.end--;
-            if (!this.hasMore) {
-                this.hasMore = true;
+            const wasExhausted = !this.#hasMore;
+            this.#hasMore = true;
+            if (wasExhausted) {
                 const [, bottomObserver] = getObservers();
                 if (bottomObserver) {
                     this.observer?.observe?.(bottomObserver);
@@ -257,7 +281,6 @@ export class VirtualList {
             }
         } finally {
             this.#isLoading = false;
-            this.isLoading = false;
         }
     }
 
@@ -393,7 +416,9 @@ export class VirtualList {
      */
     #updateData(elements, data) {
         for (let i = 0; i < elements.length; i++) {
-            this.props.updateTemplate(elements[i], data[i]);
+            if (data?.[i] !== undefined) {
+                this.props.updateTemplate(elements[i], data[i]);
+            }
         }
     }
 
