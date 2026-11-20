@@ -509,6 +509,348 @@ describe("VirtualList.#updateElement layout batching and scoped positioning", ()
   });
 });
 
+describe("VirtualList upward scroll compensation and template update ordering", () => {
+  let pages;
+
+  beforeEach(() => {
+    delete globalThis.window;
+    pages = Array.from({ length: 6 }, (_, pageIndex) =>
+      Array.from({ length: 10 }, (__, itemOffset) => {
+        const index = pageIndex * 10 + itemOffset;
+        return { id: index, title: `[Entry ${index}]` };
+      }),
+    );
+  });
+
+  function installMockWindow(initialScrollY = 0) {
+    const scrollListeners = [];
+    const scrollCalls = [];
+    const win = {
+      scrollX: 0,
+      scrollY: initialScrollY,
+      innerHeight: 800,
+      scrollBy(x, y) {
+        this.scrollX += x;
+        this.scrollY += y;
+        scrollCalls.push({
+          type: "scrollBy",
+          x,
+          y,
+          resultingScrollY: this.scrollY,
+        });
+      },
+      scrollTo(x, y) {
+        const deltaY = y - this.scrollY;
+        this.scrollX = x;
+        this.scrollY = y;
+        scrollCalls.push({
+          type: "scrollTo",
+          x,
+          y,
+          deltaY,
+          resultingScrollY: this.scrollY,
+        });
+      },
+      addEventListener(event, handler) {
+        if (event === "scroll") {
+          scrollListeners.push(handler);
+        }
+      },
+      removeEventListener(event, handler) {
+        if (event === "scroll") {
+          const idx = scrollListeners.indexOf(handler);
+          if (idx !== -1) {
+            scrollListeners.splice(idx, 1);
+          }
+        }
+      },
+      dispatchScroll(nextScrollY) {
+        this.scrollY = nextScrollY;
+        for (const listener of [...scrollListeners]) {
+          listener();
+        }
+      },
+    };
+    globalThis.window = win;
+    return { win, scrollCalls };
+  }
+
+  it("populates template data before measuring recycled element heights during upward pagination", async () => {
+    const callSequence = [];
+    const heightForDatum = (datum) => 140 + (datum.id % 5) * 40;
+    const env = createDOMEnvironment({ heightForDatum });
+
+    const list = new VirtualList(globalThis.document.body, {
+      getPage: async (page) => pages[page] ?? [],
+      getTemplate: (datum) => {
+        const card = env.createCard(datum);
+        const origGetRect = card.getBoundingClientRect.bind(card);
+        card.getBoundingClientRect = () => {
+          callSequence.push({
+            op: "measure",
+            datumId: card.datum.id,
+            height: card._height,
+          });
+          return origGetRect();
+        };
+        return card;
+      },
+      updateTemplate: (card, datum) => {
+        callSequence.push({ op: "updateTemplate", datumId: datum.id });
+        env.updateCard(card, datum);
+      },
+      pageSize: 10,
+    });
+    list.render();
+
+    // Populate pages 0, 1, 2 (active items 10..29)
+    await env.triggerScroll("down");
+    await env.triggerScroll("down");
+    await env.triggerScroll("down");
+
+    callSequence.length = 0;
+    await env.triggerScroll("up");
+
+    const updateIndices = callSequence
+      .map((entry, idx) => (entry.op === "updateTemplate" ? idx : -1))
+      .filter((idx) => idx !== -1);
+    const measureIndices = callSequence
+      .map((entry, idx) => (entry.op === "measure" ? idx : -1))
+      .filter((idx) => idx !== -1);
+
+    assert.equal(
+      updateIndices.length,
+      10,
+      "Should update all 10 recycled elements",
+    );
+    assert.ok(
+      measureIndices.length >= 10,
+      "Should measure all newly prepended elements",
+    );
+    assert.ok(
+      Math.max(...updateIndices) < Math.min(...measureIndices),
+      "All updateTemplate calls must complete before any getBoundingClientRect height reads",
+    );
+
+    // Verify measured heights reflect the newly bound Entries 0..9 (not stale Entries 20..29)
+    const measuredIds = callSequence
+      .filter((e) => e.op === "measure")
+      .slice(0, 10)
+      .map((e) => e.datumId);
+    assert.deepEqual(
+      measuredIds,
+      Array.from({ length: 10 }, (_, i) => i),
+    );
+
+    // Verify exact spacing without overlaps or gaps for variable heights
+    let expectedY = 0;
+    for (let i = 0; i < list.pool.length; i++) {
+      const actualY = +list.pool[i].getAttribute("data-y");
+      assert.equal(
+        actualY,
+        expectedY,
+        `Card ${i} should sit at exact cumulative variable height`,
+      );
+      expectedY += heightForDatum(list.pool[i].datum) + 2 * MARGIN;
+    }
+    assert.equal(
+      env.elementsById.get("top-observer").style.transform,
+      "translateY(0px)",
+    );
+    assert.equal(
+      env.elementsById.get("bottom-observer").style.transform,
+      `translateY(${expectedY}px)`,
+    );
+  });
+
+  it("preserves exact screen position of top visible card and prevents negative coordinates when prepended templates grow taller", async () => {
+    // Initial downward pass uses compact heights (180px), upward pass returns expanded heights (320px) for Page 0
+    let expandPageZero = false;
+    const heightForDatum = (datum) =>
+      expandPageZero && datum.id < 10 ? 320 : 180;
+    const env = createDOMEnvironment({ heightForDatum });
+    const { win, scrollCalls } = installMockWindow(0);
+
+    const list = new VirtualList(globalThis.document.body, {
+      getPage: async (page) => pages[page] ?? [],
+      getTemplate: env.createCard,
+      updateTemplate: env.updateCard,
+      pageSize: 10,
+    });
+    list.render();
+
+    // Load Pages 0, 1, 2 (active items 10..29; Entry 10 sits at 10 * (180 + 32) = 2120)
+    await env.triggerScroll("down");
+    await env.triggerScroll("down");
+    await env.triggerScroll("down");
+
+    const anchorCard = list.pool[0]; // Entry 10
+    const anchorYBefore = +anchorCard.getAttribute("data-y");
+    assert.equal(anchorYBefore, 2120);
+
+    // User is reading Entry 10 near the top of the viewport (viewport offset = +40px)
+    win.scrollY = 2080;
+    const screenOffsetBefore = anchorYBefore - win.scrollY;
+
+    // Now Page 0 has taller content (10 * (320 + 32) = 3520 > 2120)
+    expandPageZero = true;
+    scrollCalls.length = 0;
+    await env.triggerScroll("up");
+
+    // Coordinate at start = 0 must never go negative and cards must not overlap
+    for (let i = 0; i < list.pool.length; i++) {
+      const yPos = +list.pool[i].getAttribute("data-y");
+      assert.ok(
+        yPos >= 0,
+        `Card ${i} must have non-negative translateY, got ${yPos}`,
+      );
+      if (i > 0) {
+        const prevY = +list.pool[i - 1].getAttribute("data-y");
+        const expectedStride = list.pool[i - 1]._height + 2 * MARGIN;
+        assert.equal(
+          yPos,
+          prevY + expectedStride,
+          `Card ${i} must not overlap Card ${i - 1}`,
+        );
+      }
+    }
+
+    const anchorYAfter = +anchorCard.getAttribute("data-y");
+    assert.equal(anchorYAfter, 3520);
+    assert.equal(
+      scrollCalls.length,
+      1,
+      "Should synchronously adjust window scroll once",
+    );
+    assert.equal(
+      scrollCalls[0].y,
+      1400,
+      "Scroll delta should equal measured height delta (3520 - 2120)",
+    );
+
+    const screenOffsetAfter = anchorYAfter - win.scrollY;
+    assert.equal(
+      screenOffsetAfter,
+      screenOffsetBefore,
+      "Top visible card must retain its exact screen position",
+    );
+    assert.equal(
+      list.pool.length,
+      list.poolLimit,
+      "Pool must retain fixed DOM node count pageSize * 2",
+    );
+    delete globalThis.window;
+  });
+
+  it("does not strand #top-observer below the viewport when scrolling rapidly to scrollY = 0 during fetch latency", async () => {
+    const cardHeight = 200;
+    const stride = cardHeight + 2 * MARGIN; // 232
+    const env = createDOMEnvironment({ heightForDatum: () => cardHeight });
+    const { win } = installMockWindow(0);
+
+    let resolvePendingTopFetch = null;
+    const list = new VirtualList(globalThis.document.body, {
+      getPage: (page) => {
+        if (resolvePendingTopFetch === "intercept") {
+          return new Promise((resolve) => {
+            resolvePendingTopFetch = () => resolve(pages[page] ?? []);
+          });
+        }
+        return Promise.resolve(pages[page] ?? []);
+      },
+      getTemplate: env.createCard,
+      updateTemplate: env.updateCard,
+      pageSize: 10,
+    });
+    list.render();
+
+    // Scroll down to Pages 0..3 so active pool holds items 20..39 (start = 2, topY = 4640)
+    await env.triggerScroll("down");
+    await env.triggerScroll("down");
+    await env.triggerScroll("down");
+    await env.triggerScroll("down");
+
+    const topObserver = env.elementsById.get("top-observer");
+    assert.equal(topObserver.style.transform, `translateY(${20 * stride}px)`);
+
+    // Simulate user jumping rapidly to scrollY = 0 while DB fetch is delayed
+    resolvePendingTopFetch = "intercept";
+    win.dispatchScroll(0);
+    assert.equal(
+      typeof resolvePendingTopFetch,
+      "function",
+      "Rapid scroll above topY should initiate top page fetch",
+    );
+    assert.equal(win.scrollY, 0);
+
+    // Resolve delayed fetch for Page 1 (items 10..19, new topY = 2320)
+    resolvePendingTopFetch();
+    resolvePendingTopFetch = null;
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    const newTopObserverY = +list.pool[0].getAttribute("data-y");
+    assert.equal(newTopObserverY, 10 * stride);
+    assert.equal(topObserver.style.transform, `translateY(${10 * stride}px)`);
+
+    // #top-observer screen position (newTopObserverY - win.scrollY) must be inside viewport [0, innerHeight]
+    const topObserverScreenY = newTopObserverY - win.scrollY;
+    assert.ok(
+      topObserverScreenY >= 0 && topObserverScreenY < win.innerHeight,
+      `#top-observer must remain inside visible viewport, got screenY=${topObserverScreenY}`,
+    );
+    delete globalThis.window;
+  });
+
+  it("synchronizes container.style.height across both downward and upward pagination", async () => {
+    const env = createDOMEnvironment({
+      heightForDatum: (d) => 150 + (d.id % 3) * 30,
+    });
+    const container = () => env.elementsById.get("container");
+
+    // Compute realistic container scrollHeight based on bottom-most positioned child/observer
+    const list = new VirtualList(globalThis.document.body, {
+      getPage: async (page) => pages[page] ?? [],
+      getTemplate: env.createCard,
+      updateTemplate: env.updateCard,
+      pageSize: 10,
+    });
+    list.render();
+
+    Object.defineProperty(container(), "scrollHeight", {
+      get() {
+        const explicitHeight = parseFloat(this.style.height) || 0;
+        const bottomObs = env.elementsById.get("bottom-observer");
+        const match = bottomObs.style.transform.match(
+          /translateY\(([-\d.]+)px\)/,
+        );
+        const bottomY = match ? parseFloat(match[1]) + bottomObs._height : 0;
+        return Math.max(explicitHeight, bottomY);
+      },
+    });
+
+    await env.triggerScroll("down");
+    const heightPage0 = parseFloat(container().style.height);
+    assert.ok(heightPage0 > 0);
+
+    await env.triggerScroll("down");
+    const heightPage1 = parseFloat(container().style.height);
+    assert.ok(heightPage1 > heightPage0);
+
+    await env.triggerScroll("down");
+    const heightPage2 = parseFloat(container().style.height);
+    assert.ok(heightPage2 > heightPage1);
+
+    // Scroll back up to start = 0: container.style.height must synchronize back to Page 0..1 active height
+    await env.triggerScroll("up");
+    const heightAfterUp = parseFloat(container().style.height);
+    assert.equal(
+      heightAfterUp,
+      heightPage1,
+      "Container height must synchronize with active list height on upward pagination",
+    );
+  });
+});
+
 describe("VirtualList terminal boundary guard", () => {
   it("halts pagination cleanly without throwing TypeError when scrolling past page index 9", async () => {
     const env = createDOMEnvironment({ heightForDatum: () => 200 });
