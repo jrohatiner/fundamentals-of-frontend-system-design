@@ -4,7 +4,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import http from "node:http";
 import os from "node:os";
 import path from "node:path";
-import { describe, it } from "node:test";
+import { afterEach, describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
 import { resizeObserver } from "../../../utils/observer.js";
 import { VirtualList as VirtualList56 } from "./virtual-list.js";
@@ -284,6 +284,25 @@ describe("utils/observer.js resizeObserver helper", () => {
 });
 
 describe("VirtualList dynamic ResizeObserver offset recalculation", () => {
+  const savedGlobals = {
+    DocumentFragment: globalThis.DocumentFragment,
+    document: globalThis.document,
+    getComputedStyle: globalThis.getComputedStyle,
+    IntersectionObserver: globalThis.IntersectionObserver,
+    ResizeObserver: globalThis.ResizeObserver,
+    requestAnimationFrame: globalThis.requestAnimationFrame,
+  };
+
+  afterEach(() => {
+    for (const [key, val] of Object.entries(savedGlobals)) {
+      if (val === undefined) {
+        delete globalThis[key];
+      } else {
+        globalThis[key] = val;
+      }
+    }
+  });
+
   it("recalculates card/observer offsets, scales rem margins, and grows #container min-height in one rAF without layout thrashing", async () => {
     const env = createResizeHarness({
       initialMarginPx: 32,
@@ -463,7 +482,10 @@ describe("Browser integration: ResizeObserver text scaling, text spacing, and fo
       res.end(readFileSync(filePath));
     });
     await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
-    t.after(() => server.close());
+    t.after(() => {
+      server.closeAllConnections?.();
+      server.close();
+    });
     const baseUrl = `http://127.0.0.1:${server.address().port}`;
 
     const userDataDir = mkdtempSync(

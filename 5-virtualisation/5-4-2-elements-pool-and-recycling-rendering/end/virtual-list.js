@@ -2,19 +2,12 @@ import {
   intersectionObserver,
   resizeObserver,
 } from "../../../utils/observer.js";
-
-const MARGIN = 16;
-import { intersectionObserver } from "../../../utils/observer.js";
 import { MARGIN, getList, y } from "../../../utils/virtual-list-helpers.js";
 
 const getObservers = () => [
   document.getElementById("top-observer"),
   document.getElementById("bottom-observer"),
 ];
-
-function getList() {
-  return document.getElementById("virtual-list");
-}
 
 /**
  * Computes vertical separation between adjacent cards from computed CSS margins,
@@ -45,23 +38,6 @@ function getVerticalMargin(element) {
     }
   }
   return 2 * MARGIN;
-}
-
-/**
- * Returns `data-y` attribute of the HTMLElement, if value is provided
- * additionally updates the attribute
- *
- * @param element {HTMLElement}
- * @param value {string | number}
- * @returns {?string}
- */
-function y(element, value = undefined) {
-  if (value != null) {
-    element?.setAttribute("data-y", value);
-  }
-  return element?.getAttribute("data-y");
-function getContainer() {
-  return document.getElementById("container");
 }
 
 export class VirtualList {
