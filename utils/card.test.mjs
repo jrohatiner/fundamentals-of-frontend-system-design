@@ -428,10 +428,20 @@ describe('curriculum exercises render cards with utils/card.js in Chrome', () =>
         });
         assert.deepEqual(chrome.pageErrors, []);
 
-        // 3. Verify 3-mutation-observer/begin/index.html
+        // 3. Verify 3-mutation-observer/begin/index.html and 3-mutation-observer/end/index.html
         chrome.pageErrors.length = 0;
         await chrome.send('Page.navigate', {
             url: `${baseUrl}/3-mutation-observer/begin/index.html`,
+        });
+        await waitForCondition(
+            chrome.evaluate,
+            `document.querySelectorAll('#list .card').length === 10`
+        );
+        assert.deepEqual(chrome.pageErrors, []);
+
+        chrome.pageErrors.length = 0;
+        await chrome.send('Page.navigate', {
+            url: `${baseUrl}/3-mutation-observer/end/index.html`,
         });
         await waitForCondition(
             chrome.evaluate,
@@ -458,10 +468,10 @@ describe('curriculum exercises render cards with utils/card.js in Chrome', () =>
         });
         assert.deepEqual(chrome.pageErrors, []);
 
-        // 5. Verify 5-virtualisation/5-6-scroll-preservation/end/index.html including node recycling
+        // 5. Verify 5-virtualisation/5-5-top-observer/end/index.html including node recycling
         chrome.pageErrors.length = 0;
         await chrome.send('Page.navigate', {
-            url: `${baseUrl}/5-virtualisation/5-6-scroll-preservation/end/index.html`,
+            url: `${baseUrl}/5-virtualisation/5-5-top-observer/end/index.html`,
         });
         await waitForCondition(
             chrome.evaluate,
