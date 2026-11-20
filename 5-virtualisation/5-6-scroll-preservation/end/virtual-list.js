@@ -65,9 +65,9 @@ export class VirtualList {
      */
     toHTML() {
         return `<div id="container">
-        <div id="top-observer">Top Observer</div>
+        <div id="top-observer" aria-hidden="true"></div>
         <main id="virtual-list"></main>
-        <div id="bottom-observer">Bottom Observer</div>
+        <div id="bottom-observer" aria-hidden="true"></div>
         </div>`.trim();
     }
 
@@ -97,11 +97,8 @@ export class VirtualList {
                 if (entry.isIntersecting) {
                     const id = entry.target.id;
                     if (id === 'top-observer' && this.start > 0) {
-                        void this.#handleTopObserver();
-                    } else if (id === 'bottom-observer' && this.hasMore) {
-                        void this.#handleBottomObserver();
                         void this.#handleTopObserver().catch(() => {});
-                    } else if (id === 'bottom-observer') {
+                    } else if (id === 'bottom-observer' && this.hasMore) {
                         void this.#handleBottomObserver().catch(() => {});
                     }
                 }
@@ -127,13 +124,10 @@ export class VirtualList {
      * @returns Promise<void>
      */
     async #handleBottomObserver() {
-        if (this.isLoading || !this.hasMore) {
+        if (this.isLoading || this.#isLoading || !this.hasMore) {
             return;
         }
         this.isLoading = true;
-        if (this.#isLoading) {
-            return;
-        }
         this.#isLoading = true;
         try {
             const container = getContainer();
@@ -145,7 +139,6 @@ export class VirtualList {
                 if (bottomObserver) {
                     this.observer?.unobserve?.(bottomObserver);
                 }
-            if (!data?.length) {
                 return;
             }
             this.end++;
@@ -180,9 +173,10 @@ export class VirtualList {
      * @returns Promise<void>
      */
     async #handleTopObserver() {
-        if (this.#isLoading) {
+        if (this.isLoading || this.#isLoading) {
             return;
         }
+        this.isLoading = true;
         this.#isLoading = true;
         try {
             const data = await this.props.getPage(this.start - 1);
@@ -199,6 +193,7 @@ export class VirtualList {
             this.#updateData(recycled, data);
             this.end--;
         } finally {
+            this.isLoading = false;
             this.#isLoading = false;
         }
     }
