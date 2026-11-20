@@ -1155,7 +1155,10 @@ describe("VirtualList active element blur guard and static card template", () =>
       1,
       "Focused descendant inside recycled card must be blurred",
     );
-    assert.equal(env.doc.activeElement, env.doc.body);
+    assert.equal(
+      env.doc.activeElement,
+      env.virtualList.pool[0].children[1].children[0],
+    );
 
     const blurIdx = env.events.findIndex(
       (e) => e.type === "blur" && e.target === nestedFocusable,
@@ -1213,7 +1216,10 @@ describe("VirtualList active element blur guard and static card template", () =>
       1,
       "Focused descendant inside upward-recycled card must be blurred",
     );
-    assert.equal(env.doc.activeElement, env.doc.body);
+    assert.equal(
+      env.doc.activeElement,
+      env.virtualList.pool[7].children[1].children[0],
+    );
 
     const blurIdx = env.events.findIndex(
       (e) => e.type === "blur" && e.target === nestedFocusable,
