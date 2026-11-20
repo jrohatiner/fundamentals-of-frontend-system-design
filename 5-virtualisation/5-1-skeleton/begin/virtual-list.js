@@ -15,10 +15,10 @@ export class VirtualList {
     this.root = root;
   }
   /**
-   * Returns an HTML Representation of the component, should have the following structure:
-   * #container>
+   * Returns an HTML Representation of the component, should have the following structure
+   * inside main#container:
    *    #top-observer+
-   *    #virtual-list+
+   *    div#virtual-list+
    *    #bottom-observer
    * @returns {string}
    */
@@ -27,10 +27,10 @@ export class VirtualList {
      * Part 1 - App Skeleton
      *
      * @todo
-     * Create container div which will include:
-     *   - top-observer
-     *   - virtual-list
-     *   - bottom-observer
+     * Render children inside the static main#container host:
+     *   - #top-observer
+     *   - div#virtual-list
+     *   - #bottom-observer
      */
     return ``;
   }

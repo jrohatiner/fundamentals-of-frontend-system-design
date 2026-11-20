@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync } from "node:fs";
+import { rm } from "node:fs/promises";
 import http from "node:http";
 import os from "node:os";
 import path from "node:path";
@@ -328,7 +329,8 @@ describe("VirtualList consumer integration (5-2 and 5-6)", () => {
     const observedTargets = [];
     let activeCallback = null;
 
-    const root = new MockElement("body", "body");
+    const root = new MockElement("main", "container");
+    elementsById.set("container", root);
     Object.defineProperty(root, "innerHTML", {
       get() {
         return this._innerHTML ?? "";
@@ -337,19 +339,17 @@ describe("VirtualList consumer integration (5-2 and 5-6)", () => {
         this._innerHTML = html;
         elementsById.clear();
         this.children = [];
-        if (html.includes('id="container"')) {
-          const container = new MockElement("div", "container");
+        elementsById.set("container", this);
+        if (html.includes('id="virtual-list"')) {
           const topObserver = new MockElement("div", "top-observer");
-          const list = new MockElement("main", "virtual-list");
+          const list = new MockElement("div", "virtual-list");
           const bottomObserver = new MockElement("div", "bottom-observer");
           if (!omitTopSentinel) {
-            container.appendChild(topObserver);
+            this.appendChild(topObserver);
             elementsById.set("top-observer", topObserver);
           }
-          container.appendChild(list);
-          container.appendChild(bottomObserver);
-          this.appendChild(container);
-          elementsById.set("container", container);
+          this.appendChild(list);
+          this.appendChild(bottomObserver);
           elementsById.set("virtual-list", list);
           elementsById.set("bottom-observer", bottomObserver);
         }
@@ -521,7 +521,7 @@ async function launchHeadlessChrome(chromeBin) {
       "--remote-debugging-port=0",
       "about:blank",
     ],
-    { stdio: ["ignore", "ignore", "pipe"], detached: true },
+    { detached: true, stdio: ["ignore", "ignore", "pipe"] },
   );
 
   const debugPort = await new Promise((resolve, reject) => {
@@ -623,7 +623,7 @@ async function launchHeadlessChrome(chromeBin) {
       await new Promise((resolve) => proc.once("exit", resolve));
     }
     proc.stderr.destroy();
-    rmSync(userDataDir, {
+    await rm(userDataDir, {
       recursive: true,
       force: true,
       maxRetries: 10,

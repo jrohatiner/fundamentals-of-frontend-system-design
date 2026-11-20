@@ -82,17 +82,20 @@ function createDOMEnvironment({ heightForDatum = () => 200 } = {}) {
     set innerHTML(html) {
       this.children = [];
       elementsById.clear();
-      if (html.includes('id="container"')) {
-        const container = new MockElement("div", "container");
+      if (html.includes('id="virtual-list"')) {
+        const container =
+          this.id === "container" ? this : new MockElement("main", "container");
         const topObserver = new MockElement("div", "top-observer");
-        const list = new MockElement("main", "virtual-list");
+        const list = new MockElement("div", "virtual-list");
         const bottomObserver = new MockElement("div", "bottom-observer");
         topObserver._height = 100;
         bottomObserver._height = 100;
         container.appendChild(topObserver);
         container.appendChild(list);
         container.appendChild(bottomObserver);
-        this.appendChild(container);
+        if (container !== this) {
+          this.appendChild(container);
+        }
         elementsById.set("container", container);
         elementsById.set("top-observer", topObserver);
         elementsById.set("virtual-list", list);
@@ -1240,12 +1243,11 @@ class BoundaryMockElement {
 
   set innerHTML(html) {
     this.children = [];
-    if (html.includes('id="container"')) {
-      const container = new BoundaryMockElement(
-        "div",
-        this.ownerDocument,
-        "container",
-      );
+    if (html.includes('id="virtual-list"')) {
+      const container =
+        this.id === "container"
+          ? this
+          : new BoundaryMockElement("main", this.ownerDocument, "container");
       container._height = 0;
       const topObserver = new BoundaryMockElement(
         "div",
@@ -1254,7 +1256,7 @@ class BoundaryMockElement {
       );
       topObserver._height = 100;
       const virtualList = new BoundaryMockElement(
-        "main",
+        "div",
         this.ownerDocument,
         "virtual-list",
       );
@@ -1268,7 +1270,9 @@ class BoundaryMockElement {
       container.appendChild(topObserver);
       container.appendChild(virtualList);
       container.appendChild(bottomObserver);
-      this.appendChild(container);
+      if (container !== this) {
+        this.appendChild(container);
+      }
     }
   }
 }

@@ -15,11 +15,18 @@
       </article>
     </template>
   </head>
-  <body></body>
-  <script type="module">
-    import { VirtualList } from "./virtual-list.js";
-    const container = document.body;
-    const list = new VirtualList(container, {});
-    list.render();
-  </script>
+  <body>
+    <nav aria-label="Skip links">
+      <a class="skip-link" href="#container">Skip to main content</a>
+      <a class="skip-link" href="#list-end">Skip card list</a>
+    </nav>
+    <main id="container" tabindex="-1"></main>
+    <div id="list-end" tabindex="-1"></div>
+    <script type="module">
+      import { VirtualList } from "./virtual-list.js";
+      const container = document.getElementById("container");
+      const list = new VirtualList(container, {});
+      list.render();
+    </script>
+  </body>
 </html>

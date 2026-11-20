@@ -82,7 +82,8 @@ describe("VirtualList DOM allocation and recycling", () => {
     let observerCallback = null;
     const observedTargets = [];
 
-    const root = new MockElement("body");
+    const root = new MockElement("main", "container");
+    elementsById.set("container", root);
     Object.defineProperty(root, "innerHTML", {
       get() {
         return this._innerHTML ?? "";
@@ -90,17 +91,15 @@ describe("VirtualList DOM allocation and recycling", () => {
       set(html) {
         this._innerHTML = html;
         elementsById.clear();
+        elementsById.set("container", this);
         this.children = [];
-        if (html.includes('id="container"')) {
-          const container = new MockElement("div", "container");
+        if (html.includes('id="virtual-list"')) {
           const topObserver = new MockElement("div", "top-observer");
-          const list = new MockElement("main", "virtual-list");
+          const list = new MockElement("div", "virtual-list");
           const bottomObserver = new MockElement("div", "bottom-observer");
-          container.appendChild(topObserver);
-          container.appendChild(list);
-          container.appendChild(bottomObserver);
-          this.appendChild(container);
-          elementsById.set("container", container);
+          this.appendChild(topObserver);
+          this.appendChild(list);
+          this.appendChild(bottomObserver);
           elementsById.set("top-observer", topObserver);
           elementsById.set("virtual-list", list);
           elementsById.set("bottom-observer", bottomObserver);
@@ -396,13 +395,11 @@ describe("VirtualList in-flight pagination lock", () => {
           this._registry.set(this.id, this);
         }
       }
-      if (html.includes('id="container"')) {
-        const container = new MockElement(
-          "div",
-          "container",
-          this._registry,
-          0,
-        );
+      if (html.includes('id="virtual-list"')) {
+        const container =
+          this.id === "container"
+            ? this
+            : new MockElement("main", "container", this._registry, 0);
         const topObserver = new MockElement(
           "div",
           "top-observer",
@@ -411,7 +408,7 @@ describe("VirtualList in-flight pagination lock", () => {
         );
         topObserver.textContent = "Top Observer";
         const virtualList = new MockElement(
-          "main",
+          "div",
           "virtual-list",
           this._registry,
           0,
@@ -426,7 +423,9 @@ describe("VirtualList in-flight pagination lock", () => {
         container.appendChild(topObserver);
         container.appendChild(virtualList);
         container.appendChild(bottomObserver);
-        this.children.push(container);
+        if (container !== this) {
+          this.children.push(container);
+        }
       }
     }
 
@@ -509,7 +508,7 @@ describe("VirtualList in-flight pagination lock", () => {
       }
     }
 
-    const root = new MockElement("body", "root", registry, 800);
+    const root = new MockElement("main", "container", registry, 800);
 
     globalThis.document = {
       body: root,
@@ -996,13 +995,22 @@ describe("VirtualList active element blur guard and static card template", () =>
     set innerHTML(html) {
       this.children = [];
       this.ownerDoc.elementsById.clear();
-      if (html.includes('id="container"')) {
-        const container = new FocusMockElement(
-          "div",
-          this.ownerDoc,
-          this.events,
-          "container",
-        );
+      if (this.ownerDoc.body) {
+        this.ownerDoc.elementsById.set("body", this.ownerDoc.body);
+      }
+      if (this.id) {
+        this.ownerDoc.elementsById.set(this.id, this);
+      }
+      if (html.includes('id="virtual-list"')) {
+        const container =
+          this.id === "container"
+            ? this
+            : new FocusMockElement(
+                "main",
+                this.ownerDoc,
+                this.events,
+                "container",
+              );
         const topObserver = new FocusMockElement(
           "div",
           this.ownerDoc,
@@ -1010,7 +1018,7 @@ describe("VirtualList active element blur guard and static card template", () =>
           "top-observer",
         );
         const list = new FocusMockElement(
-          "main",
+          "div",
           this.ownerDoc,
           this.events,
           "virtual-list",
@@ -1024,7 +1032,9 @@ describe("VirtualList active element blur guard and static card template", () =>
         container.appendChild(topObserver);
         container.appendChild(list);
         container.appendChild(bottomObserver);
-        this.appendChild(container);
+        if (container !== this) {
+          this.appendChild(container);
+        }
       }
     }
   }

@@ -29,20 +29,6 @@ function adjustWindowScroll(scrollDelta) {
   }
 }
 
-/**
- * Returns `data-y` attribute of the HTMLElement, if value is provided
- * additionally updates the attribute
- *
- * @param element {HTMLElement}
- * @param value {string | number}
- * @returns {?string}
- */
-function y(element, value = undefined) {
-  if (value != null) {
-    element.setAttribute("data-y", value);
-  }
-}
-
 export class VirtualList {
   #hasMore = true;
   #isLoading = false;
@@ -86,19 +72,17 @@ export class VirtualList {
   }
 
   /**
-   * Returns an HTML Representation of the component, should have the following structure:
-   * #container >
-   *    .top-observer+
-   *    #virtual-list+
+   * Returns an HTML Representation of the component, should have the following structure
+   * inside main#container:
+   *    #top-observer+
+   *    div#virtual-list+
    *    #bottom-observer
    * @returns {string}
    */
   toHTML() {
-    return `<div id="container">
-        <div id="top-observer">Top Observer</div>
-        <main id="virtual-list"></main>
-        <div id="bottom-observer">Bottom Observer</div>
-        </div>`.trim();
+    return `<div id="top-observer">Top Observer</div>
+        <div id="virtual-list"></div>
+        <div id="bottom-observer">Bottom Observer</div>`.trim();
   }
 
   /**
@@ -211,7 +195,6 @@ export class VirtualList {
         ];
         this.#blurActiveInRecycled(recycled);
         this.pool = [...unchanged, ...recycled];
-        this.pool = [].concat(unchanged, recycled);
         this.#updateData(recycled, data);
         this.start++;
       }
@@ -249,7 +232,6 @@ export class VirtualList {
       ];
       this.#blurActiveInRecycled(recycled);
       this.pool = [...recycled, ...unchanged];
-      this.pool = [].concat(recycled, unchanged);
       this.#updateData(recycled, data);
       const { anchorDelta, topY } = this.#updateElement("up", recycleCount);
       this.end--;

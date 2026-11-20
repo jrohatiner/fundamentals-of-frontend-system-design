@@ -4,14 +4,17 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Frontend System Design Fundamentals</title>
+    <link rel="stylesheet" href="../../styles/index.css" />
     <link rel="stylesheet" href="./index.css" />
   </head>
   <body>
-    <main id="container" class="container"></main>
-  </body>
-  <script>
-    const container = document.getElementById("container");
-    const html = `<article class="card">
+    <nav aria-label="Skip links">
+      <a class="skip-link" href="#container">Skip to main content</a>
+    </nav>
+    <main id="container" class="container" tabindex="-1"></main>
+    <script>
+      const container = document.getElementById("container");
+      const html = `<article class="card">
     <h3 class="card__title"></h3>
     <div class="card__body">
       <div class='card__body__image'></div>
@@ -20,23 +23,24 @@
     </div>
   </article>`;
 
-    /**
-     * @param {string} title
-     * @param {string} body
-     *
-     * @return {HTMLElement
-     */
-    function createCardComponent(title, body) {
-      // @todo - Implement function
-    }
+      /**
+       * @param {string} title
+       * @param {string} body
+       *
+       * @return {HTMLElement
+       */
+      function createCardComponent(title, body) {
+        // @todo - Implement function
+      }
 
-    const component = createCardComponent(
-      "Frontend System Design: Fundamentals",
-      "This is a random body text",
-    );
+      const component = createCardComponent(
+        "Frontend System Design: Fundamentals",
+        "This is a random body text",
+      );
 
-    if (component) {
-      container.appendChild(component);
-    }
-  </script>
+      if (component instanceof Node) {
+        container.appendChild(component);
+      }
+    </script>
+  </body>
 </html>
