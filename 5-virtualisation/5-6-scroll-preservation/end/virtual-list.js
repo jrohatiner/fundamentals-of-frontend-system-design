@@ -34,6 +34,22 @@ export class VirtualList {
     #hasMore = true;
     #isLoading = false;
 
+    get hasMore() {
+        return this.#hasMore;
+    }
+
+    set hasMore(value) {
+        this.#hasMore = Boolean(value);
+    }
+
+    get isLoading() {
+        return this.#isLoading;
+    }
+
+    set isLoading(value) {
+        this.#isLoading = Boolean(value);
+    }
+
     /**
      * @param root {HTMLElement}
      * @param props {{
@@ -52,6 +68,7 @@ export class VirtualList {
         this.poolLimit = this.props.pageSize * 2;
         this.#hasMore = true;
         this.#isLoading = false;
+        this.observer = null;
     }
 
     /**
@@ -110,11 +127,12 @@ export class VirtualList {
      * @returns void
      */
     #effect() {
-        intersectionObserver(
+        this.observer?.disconnect();
+        this.observer = intersectionObserver(
             getObservers(),
             this.#handleIntersection(),
             {}
-        )
+        );
     }
 
     /**
@@ -132,10 +150,18 @@ export class VirtualList {
             const data = await this.props.getPage(this.end);
             if (!Array.isArray(data) || data.length === 0) {
                 this.#hasMore = false;
+                const [, bottomObserver] = getObservers();
+                if (bottomObserver) {
+                    this.observer?.unobserve?.(bottomObserver);
+                }
                 return;
             }
             if (data.length < this.props.pageSize) {
                 this.#hasMore = false;
+                const [, bottomObserver] = getObservers();
+                if (bottomObserver) {
+                    this.observer?.unobserve?.(bottomObserver);
+                }
                 if (this.pool.length >= this.poolLimit) {
                     return;
                 }
@@ -189,7 +215,14 @@ export class VirtualList {
             this.#updateElement("up");
             this.#updateData(recycled, data);
             this.end--;
+            const wasExhausted = !this.#hasMore;
             this.#hasMore = true;
+            if (wasExhausted) {
+                const [, bottomObserver] = getObservers();
+                if (bottomObserver) {
+                    this.observer?.observe?.(bottomObserver);
+                }
+            }
         } finally {
             this.#isLoading = false;
         }
