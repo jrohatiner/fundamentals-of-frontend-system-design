@@ -2,6 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Frontend System Design Fundamentals</title>
     <link rel="stylesheet" href="../../styles/index.css">
     <template id="card_template">
@@ -23,14 +24,8 @@
     </div>
 </main>
 <script type="module">
-    import {createCardElement, getHeading} from "./utils.js";
+    import {createCardElement, getHeading, HEADING_COMMAND_REGEX} from "./utils.js";
     import {initMockDB} from "../../utils/db.js";
-
-    const SUPPORTED_ELEMENTS = new Set([
-        '/h1',
-        '/h2',
-        '/h3'
-    ]);
 
     const db = initMockDB({
         title: "Fundamentals of Frontend System Design",
@@ -44,20 +39,31 @@
             const contentContainer = target?.parentElement?.closest('.card__body__content');
             if (
                 type === 'characterData' &&
+                target.isConnected &&
                 contentContainer?.isContentEditable &&
                 target.parentElement?.isContentEditable &&
-            if (
-                type === 'characterData' &&
-                SUPPORTED_ELEMENTS.has(target?.textContent)
+                !target.parentElement.closest('.card__body__content h1, .card__body__content h2, .card__body__content h3') &&
+                HEADING_COMMAND_REGEX.test(target?.textContent ?? '')
             ) {
                 const element = getHeading(target);
                 target.replaceWith(element);
                 element.focus();
+                const selection = window.getSelection();
+                if (selection) {
+                    const range = document.createRange();
+                    if (element.lastChild?.nodeType === Node.TEXT_NODE) {
+                        range.setStart(element.lastChild, element.lastChild.length);
+                    } else {
+                        range.setStart(element, 0);
+                    }
+                    range.collapse(true);
+                    selection.removeAllRanges();
+                    selection.addRange(range);
+                }
             }
         }
     });
     mutationObserver.observe(list, { characterData: true, subtree: true });
-    })
 
     let page = 0;
     const observer = new IntersectionObserver(async ([bottom]) => {
@@ -68,8 +74,6 @@
             data.forEach(({title, body}) => {
                 const card = createCardElement(title, body);
                 fragment.appendChild(card);
-                const content = card.querySelector('.card__body__content');
-                mutationObserver.observe(content, { characterData: true, subtree: true})
             });
 
             list.appendChild(fragment);
