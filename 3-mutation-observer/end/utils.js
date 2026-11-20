@@ -15,30 +15,29 @@ export function createCardElement(title, body) {
     return element;
 }
 
-export function getHeading(node) {
-    let element = node;
-    let headingLevel = null;
-    if (node.textContent.startsWith("/h3")) {
-        element = document.createElement("h3");
-        headingLevel = 3;
-    } else if (node.textContent.startsWith("/h2")) {
-        element = document.createElement("h2");
-        headingLevel = 2;
-    } else if (node.textContent.startsWith("/h1")) {
-        element = document.createElement("h1");
-        headingLevel = 1;
-    }
-    element.textContent = node.textContent.slice(3);
-    element.setAttribute('contenteditable', "true");
-    element.textContent = element.textContent === '' ? "Heading" : element.textContent;
+export const HEADING_COMMAND_REGEX = /^\/h([1-3])(?![0-9])[ \t\u00a0]?([\s\S]*)$/;
 
-    if (headingLevel !== null) {
-        const statusRegion = document.getElementById('editor-status');
-        if (statusRegion) {
-            statusRegion.replaceChildren(
-                document.createTextNode(`Converted block to heading level ${headingLevel}: ${element.textContent}`)
-            );
-        }
+export function getHeading(node) {
+    const text = node?.textContent ?? '';
+    const match = text.match(HEADING_COMMAND_REGEX);
+    if (!match) {
+        return node;
+    }
+
+    const [, level, trailingText] = match;
+    const element = document.createElement(`h${level}`);
+    element.setAttribute('contenteditable', "true");
+    element.setAttribute('data-placeholder', `Heading ${level}`);
+    if (trailingText) {
+        element.textContent = trailingText;
+    }
+
+    const statusRegion = document.getElementById('editor-status');
+    if (statusRegion) {
+        const suffix = trailingText ? `: ${trailingText}` : '';
+        statusRegion.replaceChildren(
+            document.createTextNode(`Converted block to heading level ${level}${suffix}`)
+        );
     }
 
     return element;

@@ -228,8 +228,20 @@
 
     const observer = new ResizeObserver((entries) => {
         for (const entry of entries) {
-            const { borderBoxSize: [{ inlineSize, blockSize }], target } = entry;
-            syncControls(target, inlineSize, blockSize);
+            const { target } = entry;
+            const boxSize = Array.isArray(entry.borderBoxSize)
+                ? entry.borderBoxSize[0]
+                : entry.borderBoxSize;
+            const inlineSize = boxSize && boxSize.inlineSize != null
+                ? boxSize.inlineSize
+                : entry.contentRect && entry.contentRect.width;
+            const blockSize = boxSize && boxSize.blockSize != null
+                ? boxSize.blockSize
+                : entry.contentRect && entry.contentRect.height;
+
+            if (inlineSize != null && blockSize != null) {
+                syncControls(target, inlineSize, blockSize);
+            }
 
             const isSmall = inlineSize < CIRCLE_THRESHOLD && blockSize < CIRCLE_THRESHOLD;
             const nextState = isSmall ? "true" : "false";

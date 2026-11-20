@@ -56,6 +56,12 @@
     border-radius: 4px;
 }
 
+[data-placeholder]:empty::before {
+    content: attr(data-placeholder);
+    color: #757575;
+    pointer-events: none;
+}
+
 #top-observer {
     background: rgba(0, 0, 255, 0.2);
     border: 2px dashed  rgba(0, 0, 255, 0.2);
