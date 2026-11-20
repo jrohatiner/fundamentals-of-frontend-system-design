@@ -32,6 +32,7 @@ function y(element, value = undefined) {
 
 export class VirtualList {
     #hasMore = true;
+    #isLoading = false;
 
     /**
      * @param root {HTMLElement}
@@ -50,6 +51,7 @@ export class VirtualList {
         this.pool = [];
         this.poolLimit = this.props.pageSize * 2;
         this.#hasMore = true;
+        this.#isLoading = false;
     }
 
     /**
@@ -84,13 +86,19 @@ export class VirtualList {
      */
     #handleIntersection() {
         return (entries) => {
+            if (this.#isLoading) {
+                return;
+            }
             for (const entry of entries) {
+                if (this.#isLoading) {
+                    return;
+                }
                 if (entry.isIntersecting) {
                     const id = entry.target.id;
                     if (id === 'top-observer' && this.start > 0) {
-                        void this.#handleTopObserver();
+                        void this.#handleTopObserver().catch(() => {});
                     } else if (id === 'bottom-observer' && this.#hasMore) {
-                        void this.#handleBottomObserver();
+                        void this.#handleBottomObserver().catch(() => {});
                     }
                 }
             }
@@ -114,43 +122,48 @@ export class VirtualList {
      * @returns Promise<void>
      */
     async #handleBottomObserver() {
-        if (!this.#hasMore) {
+        if (!this.#hasMore || this.#isLoading) {
             return;
         }
-        const container = getContainer();
-        const list = getList();
-        const data = await this.props.getPage(this.end);
-        if (!Array.isArray(data) || data.length === 0) {
-            this.#hasMore = false;
-            return;
-        }
-        if (data.length < this.props.pageSize) {
-            this.#hasMore = false;
-            if (this.pool.length >= this.poolLimit) {
+        this.#isLoading = true;
+        try {
+            const container = getContainer();
+            const list = getList();
+            const data = await this.props.getPage(this.end);
+            if (!Array.isArray(data) || data.length === 0) {
+                this.#hasMore = false;
                 return;
             }
+            if (data.length < this.props.pageSize) {
+                this.#hasMore = false;
+                if (this.pool.length >= this.poolLimit) {
+                    return;
+                }
+            }
+            this.end++;
+            if (this.pool.length < this.poolLimit) {
+                const fragment = new DocumentFragment();
+                const elements = data.map(datum => this.props.getTemplate(datum))
+                elements.forEach(el => fragment.appendChild(el));
+                this.pool.push(...elements)
+                list.appendChild(fragment);
+            } else {
+                const [unchanged, recycled] = [
+                    this.pool.slice(this.props.pageSize, this.pool.length),
+                    this.pool.slice(0, this.props.pageSize)
+                ];
+                this.pool = [].concat(
+                    unchanged,
+                    recycled
+                );
+                this.#updateData(recycled, data)
+                this.start++;
+            }
+            this.#updateElement("down");
+            container.style.height = `${container.scrollHeight}px`;
+        } finally {
+            this.#isLoading = false;
         }
-        this.end++;
-        if (this.pool.length < this.poolLimit) {
-            const fragment = new DocumentFragment();
-            const elements = data.map(datum => this.props.getTemplate(datum))
-            elements.forEach(el => fragment.appendChild(el));
-            this.pool.push(...elements)
-            list.appendChild(fragment);
-        } else {
-            const [unchanged, recycled] = [
-                this.pool.slice(this.props.pageSize, this.pool.length),
-                this.pool.slice(0, this.props.pageSize)
-            ];
-            this.pool = [].concat(
-                unchanged,
-                recycled
-            );
-            this.#updateData(recycled, data)
-            this.start++;
-        }
-        this.#updateElement("down");
-        container.style.height = `${container.scrollHeight}px`;
     }
 
     /**
@@ -158,22 +171,28 @@ export class VirtualList {
      * @returns Promise<void>
      */
     async #handleTopObserver() {
-        if (this.start <= 0) {
+        if (this.start <= 0 || this.#isLoading) {
             return;
         }
-        const data = await this.props.getPage(--this.start)
-        const [recycled, unchanged] = [
-            this.pool.slice(this.props.pageSize, this.pool.length),
-            this.pool.slice(0, this.props.pageSize)
-        ];
-        this.pool = [].concat(
-            recycled,
-            unchanged
-        );
-        this.#updateElement("up");
-        this.#updateData(recycled, data);
-        this.end--;
-        this.#hasMore = true;
+        this.#isLoading = true;
+        try {
+            const data = await this.props.getPage(this.start - 1);
+            this.start--;
+            const [recycled, unchanged] = [
+                this.pool.slice(this.props.pageSize, this.pool.length),
+                this.pool.slice(0, this.props.pageSize)
+            ];
+            this.pool = [].concat(
+                recycled,
+                unchanged
+            );
+            this.#updateElement("up");
+            this.#updateData(recycled, data);
+            this.end--;
+            this.#hasMore = true;
+        } finally {
+            this.#isLoading = false;
+        }
     }
 
 
