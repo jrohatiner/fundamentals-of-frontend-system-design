@@ -8,20 +8,20 @@ const defaultObserverConfig = { threshold: 0.25 };
  * @return {elem is Element}
  */
 function isValidTarget(elem) {
-    if (!elem || typeof elem !== 'object') {
-        return false;
+  if (!elem || typeof elem !== "object") {
+    return false;
+  }
+  if (typeof Element !== "undefined") {
+    if (elem instanceof Element) {
+      return true;
     }
-    if (typeof Element !== 'undefined') {
-        if (elem instanceof Element) {
-            return true;
-        }
-        const OwnerElement = elem.ownerDocument?.defaultView?.Element;
-        return typeof OwnerElement === 'function' && elem instanceof OwnerElement;
-    }
-    if (typeof elem.nodeType === 'number') {
-        return elem.nodeType === 1;
-    }
-    return typeof elem.tagName === 'string' && elem.tagName.length > 0;
+    const OwnerElement = elem.ownerDocument?.defaultView?.Element;
+    return typeof OwnerElement === "function" && elem instanceof OwnerElement;
+  }
+  if (typeof elem.nodeType === "number") {
+    return elem.nodeType === 1;
+  }
+  return typeof elem.tagName === "string" && elem.tagName.length > 0;
 }
 
 /**
@@ -32,19 +32,22 @@ function isValidTarget(elem) {
  * @return {unknown[]}
  */
 function normalizeTargets(target) {
-    if (target == null) {
-        return [];
-    }
-    if (isValidTarget(target)) {
-        return [target];
-    }
-    if (Array.isArray(target)) {
-        return target;
-    }
-    if (typeof target === 'object' && typeof target[Symbol.iterator] === 'function') {
-        return Array.from(target);
-    }
+  if (target == null) {
     return [];
+  }
+  if (isValidTarget(target)) {
+    return [target];
+  }
+  if (Array.isArray(target)) {
+    return target;
+  }
+  if (
+    typeof target === "object" &&
+    typeof target[Symbol.iterator] === "function"
+  ) {
+    return Array.from(target);
+  }
+  return [];
 }
 
 /**
@@ -53,18 +56,14 @@ function normalizeTargets(target) {
  * @param config   {IntersectionObserverInit} [config]
  * @return {IntersectionObserver}
  */
-export function intersectionObserver(
-    target,
-    callback,
-    config
-) {
-    const observerInit = Object.assign({}, defaultObserverConfig, config ?? {});
-    const observer = new IntersectionObserver(callback, observerInit);
-    const targets = normalizeTargets(target);
-    for (const candidate of targets) {
-        if (isValidTarget(candidate)) {
-            observer.observe(candidate);
-        }
+export function intersectionObserver(target, callback, config) {
+  const observerInit = Object.assign({}, defaultObserverConfig, config ?? {});
+  const observer = new IntersectionObserver(callback, observerInit);
+  const targets = normalizeTargets(target);
+  for (const candidate of targets) {
+    if (isValidTarget(candidate)) {
+      observer.observe(candidate);
     }
-    return observer;
+  }
+  return observer;
 }
