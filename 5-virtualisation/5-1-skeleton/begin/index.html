@@ -5,9 +5,9 @@
     <title>Virtualization</title>
     <template id="card_template">
         <article class="card">
-            <h3></h3>
+            <h2 class="card__title"></h2>
             <div class="card__body">
-                <div class='card__body__image'></div>
+                <div class='card__body__image' aria-hidden="true"></div>
                 <section class='card__body__content' contenteditable="true">
                 </section>
             </div>
@@ -15,6 +15,9 @@
     </template>
 </head>
 <body>
+<main id="container">
+    <h1>Virtualisation</h1>
+</main>
 </body>
 <script type="module">
     import {VirtualList} from "./virtual-list.js";

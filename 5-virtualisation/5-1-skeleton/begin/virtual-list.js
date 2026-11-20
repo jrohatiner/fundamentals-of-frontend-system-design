@@ -42,7 +42,10 @@ export class VirtualList {
      * @returns void
      */
     render() {
-        this.root.innerHTML = this.toHTML();
+        const html = this.toHTML();
+        if (html) {
+            this.root.innerHTML = html;
+        }
         this.#effect()
     }
 }

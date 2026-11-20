@@ -6,9 +6,9 @@
     <link rel="stylesheet" href="../../styles/index.css">
     <template id="card_template">
         <article class="card">
-            <h3 class="card__title"></h3>
+            <h2 class="card__title"></h2>
             <div class="card__body">
-                <div class='card__body__image'></div>
+                <div class='card__body__image' aria-hidden="true"></div>
                 <section class='card__body__content'>
                 </section>
             </div>
@@ -17,6 +17,7 @@
 </head>
 <body>
 <main id="container">
+    <h1>Frontend System Design Fundamentals</h1>
     <div id="list"></div>
     <div id="bottom-observer">
         Bottom Observer
@@ -24,6 +25,7 @@
 </main>
 <script type="module">
     import {initMockDB} from "../../utils/db.js";
+    import {createCardElement} from "../../utils/card.js";
 
     const [template, list, observerElement] = document.querySelectorAll("#card_template, #list, #bottom-observer");
 
@@ -31,13 +33,6 @@
         title: "Fundamentals of Frontend System Design",
         body: "Learning to use Intersection Observer"
     });
-
-    function createCardElement(title, body) {
-        const element = template.content.cloneNode(true).firstElementChild;
-        const [cardTitle, cardBody] = element.querySelectorAll('.card__title, .card__body__content');
-        [cardTitle.textContent, cardBody.textContent] = [title, body];
-        return element;
-    }
 
     /**
      * Exercise - Intersection Observer
@@ -52,8 +47,8 @@
         if(entry.isIntersecting) {
             const data = await db.getPage(page++);
             const fragment = new DocumentFragment();
-            data.forEach(({title, body}) => {
-                const card = createCardElement(title, body);
+            data.forEach(({title, body, alt, headingLevel}) => {
+                const card = createCardElement(title, body, { alt, headingLevel, template });
                 fragment.appendChild(card);
             });
             list.appendChild(fragment);

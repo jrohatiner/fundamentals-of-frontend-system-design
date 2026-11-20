@@ -6,14 +6,16 @@
     <link rel="stylesheet" href="./index.css">
 </head>
 <body>
-<main class="container"></main>
+<main id="container" class="container">
+    <h1>Frontend System Design Fundamentals</h1>
+</main>
 </body>
 <script>
     const container = document.getElementById('container');
     const html = `<article class="card">
-    <h3 class="card__title"></h3>
+    <h2 class="card__title"></h2>
     <div class="card__body">
-      <div class='card__body__image'></div>
+      <div class='card__body__image' aria-hidden="true"></div>
       <section class='card__body__content'>
       </section>
     </div>

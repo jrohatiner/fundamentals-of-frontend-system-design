@@ -1,11 +1,4 @@
-export function createCardElement(title, body) {
-    const template = document.getElementById('card_template');
-    const element = template.content.cloneNode(true).firstElementChild;
-    const [cardTitle] = element.getElementsByTagName("h3");
-    const [cardBody] = element.getElementsByTagName("section");
-    [cardTitle.textContent, cardBody.textContent] = [title, body];
-    return element;
-}
+export { createCardElement, updateCardElement } from "../../utils/card.js";
 
 export function getHeading(node) {
     let element = node;
