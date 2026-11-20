@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync } from 'node:fs';
+import { rm } from 'node:fs/promises';
 import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
@@ -75,7 +76,7 @@ async function launchHeadlessChrome() {
             '--remote-debugging-port=0',
             'about:blank',
         ],
-        { stdio: ['ignore', 'ignore', 'pipe'] }
+        { stdio: ['ignore', 'ignore', 'pipe'], detached: true }
     );
 
     const debugPort = await new Promise((resolve, reject) => {
@@ -154,10 +155,14 @@ async function launchHeadlessChrome() {
             ws.close();
         } catch {}
         if (proc.exitCode === null) {
-            proc.kill('SIGKILL');
+            try {
+                process.kill(-proc.pid, 'SIGKILL');
+            } catch {
+                proc.kill('SIGKILL');
+            }
             await new Promise((resolve) => proc.once('exit', resolve));
         }
-        rmSync(userDataDir, { recursive: true, force: true });
+        await rm(userDataDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
     }
 
     return { send, evaluate, cleanup };
@@ -387,4 +392,150 @@ test('delegates MutationObserver to #list across pagination and converts heading
         nonEditableChildText: '/h1',
         strayStillTextNode: true,
     });
+});
+
+test('exposes accessible card names, slash-command instructions, focus outlines, and live heading announcements', async (t) => {
+    const { server, baseUrl } = await startStaticServer(REPO_ROOT);
+    t.after(() => server.close());
+
+    const chrome = await launchHeadlessChrome();
+    t.after(async () => {
+        await chrome.cleanup();
+    });
+
+    await chrome.send('Page.enable');
+    await chrome.send('Runtime.enable');
+    await chrome.send('Accessibility.enable');
+
+    await chrome.send('Page.navigate', {
+        url: `${baseUrl}/3-mutation-observer/end/index.html`,
+    });
+
+    await waitForCondition(chrome.evaluate, `document.querySelectorAll('#list .card').length === 10`);
+
+    // Trigger a second page to verify unique IDs across paginated cards as well.
+    await chrome.evaluate(`document.getElementById('bottom-observer').scrollIntoView()`);
+    await waitForCondition(chrome.evaluate, `document.querySelectorAll('#list .card').length === 20`);
+
+    const ariaWiring = await chrome.evaluate(`
+        (() => {
+            const cards = Array.from(document.querySelectorAll('#list .card'));
+            const titleIds = cards.map((card) => card.querySelector('.card__title')?.id);
+            const uniqueTitleIds = new Set(titleIds.filter(Boolean));
+            const instructions = document.getElementById('slash-instructions');
+            const status = document.getElementById('editor-status');
+
+            const allLinkedCorrectly = cards.every((card) => {
+                const title = card.querySelector('.card__title');
+                const editor = card.querySelector('.card__body__content');
+                return (
+                    Boolean(title?.id) &&
+                    editor?.getAttribute('aria-labelledby') === title.id &&
+                    editor?.getAttribute('aria-describedby') === 'slash-instructions'
+                );
+            });
+
+            return {
+                cardCount: cards.length,
+                uniqueIdCount: uniqueTitleIds.size,
+                allLinkedCorrectly,
+                instructionsVisible: Boolean(instructions && instructions.offsetParent !== null),
+                instructionsText: instructions?.textContent?.trim() ?? '',
+                statusRole: status?.getAttribute('role'),
+                statusLive: status?.getAttribute('aria-live'),
+                initialStatusText: status?.textContent ?? null,
+            };
+        })()
+    `);
+
+    assert.equal(ariaWiring.cardCount, 20);
+    assert.equal(ariaWiring.uniqueIdCount, 20, 'Expected every card title to have a unique ID');
+    assert.equal(ariaWiring.allLinkedCorrectly, true);
+    assert.equal(ariaWiring.instructionsVisible, true);
+    assert.match(ariaWiring.instructionsText, /\/h1.*\/h2.*\/h3/);
+    assert.equal(ariaWiring.statusRole, 'status');
+    assert.equal(ariaWiring.statusLive, 'polite');
+    assert.equal(ariaWiring.initialStatusText, '');
+
+    // Verify Chrome Accessibility Tree exposes computed accessible name (card title) and description (slash instructions).
+    const axTree = await chrome.send('Accessibility.getFullAXTree');
+    const firstCardTitle = '[Entry 0] - Fundamentals of Frontend System Design';
+    const editorAxNode = axTree.nodes.find(
+        (node) => node.name?.value === firstCardTitle && node.role?.value === 'region'
+    );
+    assert.ok(editorAxNode, 'Expected first card editor in accessibility tree with card title as accessible name');
+    assert.match(editorAxNode.description?.value ?? '', /\/h1.*\/h2.*\/h3/);
+
+    // Verify Tab focus lands on the card editor with visible high-contrast focus outline.
+    await chrome.send('Input.dispatchKeyEvent', {
+        type: 'rawKeyDown',
+        key: 'Tab',
+        code: 'Tab',
+        windowsVirtualKeyCode: 9,
+        nativeVirtualKeyCode: 9,
+    });
+    await chrome.send('Input.dispatchKeyEvent', {
+        type: 'keyUp',
+        key: 'Tab',
+        code: 'Tab',
+        windowsVirtualKeyCode: 9,
+        nativeVirtualKeyCode: 9,
+    });
+
+    const focusState = await chrome.evaluate(`
+        (() => {
+            const el = document.activeElement;
+            const cs = getComputedStyle(el);
+            return {
+                isFirstEditor: el === document.querySelectorAll('#list .card .card__body__content')[0],
+                outlineStyle: cs.outlineStyle,
+                outlineWidth: parseFloat(cs.outlineWidth),
+            };
+        })()
+    `);
+    assert.equal(focusState.isFirstEditor, true);
+    assert.equal(focusState.outlineStyle, 'solid');
+    assert.ok(focusState.outlineWidth >= 2);
+
+    // Type /h1 in first card editor and verify live status announcement.
+    await chrome.evaluate(`
+        (() => {
+            const content = document.querySelectorAll('#list .card .card__body__content')[0];
+            content.firstChild.data = '/';
+            const range = document.createRange();
+            range.setStart(content.firstChild, 1);
+            range.collapse(true);
+            const selection = window.getSelection();
+            selection.removeAllRanges();
+            selection.addRange(range);
+        })();
+    `);
+    await chrome.send('Input.insertText', { text: 'h' });
+    await chrome.send('Input.insertText', { text: '1' });
+
+    await waitForCondition(
+        chrome.evaluate,
+        `Boolean(document.querySelectorAll('#list .card .card__body__content')[0].querySelector('h1'))`
+    );
+
+    const h1Announcement = await chrome.evaluate(`document.getElementById('editor-status').textContent`);
+    assert.match(h1Announcement, /heading level 1/i);
+
+    // Verify /h2 and /h3 also update the polite live status announcement.
+    const h2AndH3Announcements = await chrome.evaluate(`
+        new Promise((resolve) => {
+            const contents = document.querySelectorAll('#list .card .card__body__content');
+            const status = document.getElementById('editor-status');
+            contents[1].firstChild.data = '/h2';
+            queueMicrotask(() => {
+                const afterH2 = status.textContent;
+                contents[2].firstChild.data = '/h3';
+                queueMicrotask(() => {
+                    resolve({ afterH2, afterH3: status.textContent });
+                });
+            });
+        })
+    `);
+    assert.match(h2AndH3Announcements.afterH2, /heading level 2/i);
+    assert.match(h2AndH3Announcements.afterH3, /heading level 3/i);
 });

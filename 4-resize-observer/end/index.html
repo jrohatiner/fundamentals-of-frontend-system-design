@@ -2,28 +2,66 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Frontend System Design Fundamentals</title>
     <style>
         * {
             box-sizing: border-box;
         }
         body {
-            height: 100vh
+            min-height: 100vh;
+            margin: 0;
+            padding: 1.5rem 1rem;
+            font-family: system-ui, -apple-system, sans-serif;
+            color: #111111;
+            background: #ffffff;
+        }
+        .sr-only {
+            position: absolute;
+            width: 1px;
+            height: 1px;
+            padding: 0;
+            margin: -1px;
+            overflow: hidden;
+            clip: rect(0, 0, 0, 0);
+            white-space: nowrap;
+            border: 0;
+            color: #000000;
+            background: #ffffff;
+        }
+        .instructions {
+            margin: 0 auto 1.5rem;
+            max-width: 640px;
+            font-size: 0.95rem;
+            line-height: 1.5;
+            color: #111111;
         }
         #container {
             margin: 0 auto;
-            width: 600px;
-            display:grid;
-            grid-template-columns: 50% 50%;
+            width: 100%;
+            max-width: 640px;
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
             grid-row-gap: 2rem;
             grid-column-gap: 2rem;
         }
+        @media (max-width: 600px) {
+            #container {
+                grid-template-columns: 1fr;
+            }
+        }
+        .box-item {
+            display: flex;
+            flex-direction: column;
+            gap: 0.75rem;
+            align-items: flex-start;
+        }
         .box {
-            margin: 2rem;
-            width: 100%;
+            width: 180px;
             min-width: 100px;
+            max-width: 300px;
             min-height: 100px;
-            height: 100%;
+            height: 160px;
             border: 2px solid black;
             resize: both;
             overflow: hidden;
@@ -31,52 +69,246 @@
             flex-direction: column;
             justify-content: center;
             align-items: center;
+            font-weight: 700;
+            font-size: 1.25rem;
         }
-        .box:nth-child(1) {
+        .box-item:nth-child(1) .box {
             background: rgba(0, 255, 0, 0.5);
         }
-        .box:nth-child(2) {
+        .box-item:nth-child(2) .box {
             background: rgba(255, 255, 0, 0.5);
         }
-        .box:nth-child(3) {
+        .box-item:nth-child(3) .box {
             background: rgba(255, 0, 0, 0.5);
         }
-        .box:nth-child(4) {
+        .box-item:nth-child(4) .box {
             background: rgba(0, 0, 255, 0.5);
+        }
+        .box-controls {
+            width: 100%;
+            max-width: 260px;
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
+        }
+        .control-field {
+            display: flex;
+            flex-direction: column;
+            gap: 0.2rem;
+            font-size: 0.875rem;
+            font-weight: 500;
+        }
+        .control-field input[type="range"] {
+            width: 100%;
+            min-height: 24px;
+            margin: 0;
+            cursor: pointer;
+            accent-color: #111111;
+        }
+        .box:focus,
+        .box:focus-visible,
+        .control-field input[type="range"]:focus,
+        .control-field input[type="range"]:focus-visible {
+            outline: 3px solid #000000;
+            outline-offset: 3px;
         }
     </style>
 </head>
 <body>
-<main id="container">
-    <div class="box">
-        A
-    </div>
-    <div class="box">
-        B
-    </div>
-    <div class="box">
-        C
-    </div>
-    <div class="box">
-        D
+<main aria-labelledby="page-title">
+    <h1 id="page-title" class="sr-only">Resize Observer Demonstration</h1>
+    <p id="resize-instructions" class="instructions">
+        Use the width and height sliders or focus any box and press Arrow keys (Left/Right for width, Down/Up for height) to resize. Boxes smaller than 150 by 150 pixels morph into circles.
+    </p>
+    <div id="resize-status" class="sr-only" role="status" aria-live="polite" aria-atomic="true"></div>
+    <div id="container">
+        <div class="box-item">
+            <div class="box" id="box-a" data-label="Box A" tabindex="0" role="group" aria-label="Box A" aria-describedby="resize-instructions">
+                A
+            </div>
+            <div class="box-controls">
+                <label class="control-field" for="box-a-width">
+                    <span>Box A width (<span data-output="width">180</span>px)</span>
+                    <input type="range" id="box-a-width" data-axis="width" min="100" max="300" step="10" value="180">
+                </label>
+                <label class="control-field" for="box-a-height">
+                    <span>Box A height (<span data-output="height">160</span>px)</span>
+                    <input type="range" id="box-a-height" data-axis="height" min="100" max="300" step="10" value="160">
+                </label>
+            </div>
+        </div>
+        <div class="box-item">
+            <div class="box" id="box-b" data-label="Box B" tabindex="0" role="group" aria-label="Box B" aria-describedby="resize-instructions">
+                B
+            </div>
+            <div class="box-controls">
+                <label class="control-field" for="box-b-width">
+                    <span>Box B width (<span data-output="width">180</span>px)</span>
+                    <input type="range" id="box-b-width" data-axis="width" min="100" max="300" step="10" value="180">
+                </label>
+                <label class="control-field" for="box-b-height">
+                    <span>Box B height (<span data-output="height">160</span>px)</span>
+                    <input type="range" id="box-b-height" data-axis="height" min="100" max="300" step="10" value="160">
+                </label>
+            </div>
+        </div>
+        <div class="box-item">
+            <div class="box" id="box-c" data-label="Box C" tabindex="0" role="group" aria-label="Box C" aria-describedby="resize-instructions">
+                C
+            </div>
+            <div class="box-controls">
+                <label class="control-field" for="box-c-width">
+                    <span>Box C width (<span data-output="width">180</span>px)</span>
+                    <input type="range" id="box-c-width" data-axis="width" min="100" max="300" step="10" value="180">
+                </label>
+                <label class="control-field" for="box-c-height">
+                    <span>Box C height (<span data-output="height">160</span>px)</span>
+                    <input type="range" id="box-c-height" data-axis="height" min="100" max="300" step="10" value="160">
+                </label>
+            </div>
+        </div>
+        <div class="box-item">
+            <div class="box" id="box-d" data-label="Box D" tabindex="0" role="group" aria-label="Box D" aria-describedby="resize-instructions">
+                D
+            </div>
+            <div class="box-controls">
+                <label class="control-field" for="box-d-width">
+                    <span>Box D width (<span data-output="width">180</span>px)</span>
+                    <input type="range" id="box-d-width" data-axis="width" min="100" max="300" step="10" value="180">
+                </label>
+                <label class="control-field" for="box-d-height">
+                    <span>Box D height (<span data-output="height">160</span>px)</span>
+                    <input type="range" id="box-d-height" data-axis="height" min="100" max="300" step="10" value="160">
+                </label>
+            </div>
+        </div>
     </div>
 </main>
 <script type="module">
- const observer = new ResizeObserver((entries) => {
-     for(let entry of entries) {
-         const {borderBoxSize: [{inlineSize, blockSize}], target} = entry;
-         console.log(inlineSize, blockSize)
-         if(inlineSize < 150 && blockSize < 150) {
-            target.style.borderRadius = "100%";
-            target.style.borderWidth = "4px"
-        } else {
-            target.style.borderRadius = "unset";
-            target.style.borderWidth = "unset"
+    const MIN_SIZE = 100;
+    const MAX_SIZE = 300;
+    const KEYBOARD_STEP = 10;
+    const CIRCLE_THRESHOLD = 150;
+
+    const statusRegion = document.getElementById('resize-status');
+    const shapeByBox = new WeakMap();
+
+    function clampSize(value) {
+        return Math.min(MAX_SIZE, Math.max(MIN_SIZE, Math.round(value)));
+    }
+
+    function announceStatus(message) {
+        if (!statusRegion) return;
+        statusRegion.replaceChildren(document.createTextNode(message));
+    }
+
+    function syncControls(box, inlineSize, blockSize) {
+        const item = box.closest('.box-item');
+        if (!item) return;
+
+        const roundedWidth = Math.round(inlineSize);
+        const roundedHeight = Math.round(blockSize);
+        const widthInput = item.querySelector('input[data-axis="width"]');
+        const heightInput = item.querySelector('input[data-axis="height"]');
+        const widthOutput = item.querySelector('[data-output="width"]');
+        const heightOutput = item.querySelector('[data-output="height"]');
+
+        if (widthInput && document.activeElement !== widthInput) {
+            widthInput.value = String(clampSize(roundedWidth));
         }
-     }
- })
- const elements = document.querySelectorAll('.box');
- elements.forEach(el => observer.observe(el));
+        if (heightInput && document.activeElement !== heightInput) {
+            heightInput.value = String(clampSize(roundedHeight));
+        }
+        if (widthOutput) {
+            widthOutput.textContent = String(roundedWidth);
+        }
+        if (heightOutput) {
+            heightOutput.textContent = String(roundedHeight);
+        }
+    }
+
+    const observer = new ResizeObserver((entries) => {
+        for (const entry of entries) {
+            const { borderBoxSize: [{ inlineSize, blockSize }], target } = entry;
+            const isCircle = inlineSize < CIRCLE_THRESHOLD && blockSize < CIRCLE_THRESHOLD;
+
+            if (isCircle) {
+                target.style.borderRadius = "100%";
+                target.style.borderWidth = "4px";
+            } else {
+                target.style.borderRadius = "unset";
+                target.style.borderWidth = "unset";
+            }
+
+            syncControls(target, inlineSize, blockSize);
+
+            const nextShape = isCircle ? "circle" : "rectangle";
+            const previousShape = shapeByBox.get(target);
+            shapeByBox.set(target, nextShape);
+
+            if (previousShape !== undefined && previousShape !== nextShape) {
+                const label = target.dataset.label || target.getAttribute('aria-label') || 'Box';
+                const dims = `${Math.round(inlineSize)} by ${Math.round(blockSize)} pixels`;
+                announceStatus(
+                    isCircle
+                        ? `${label} morphed into a circle (${dims}).`
+                        : `${label} restored to a rectangle (${dims}).`
+                );
+            }
+        }
+    });
+
+    const items = document.querySelectorAll('.box-item');
+    items.forEach((item) => {
+        const box = item.querySelector('.box');
+        const widthInput = item.querySelector('input[data-axis="width"]');
+        const heightInput = item.querySelector('input[data-axis="height"]');
+        const widthOutput = item.querySelector('[data-output="width"]');
+        const heightOutput = item.querySelector('[data-output="height"]');
+
+        widthInput.addEventListener('input', () => {
+            box.style.width = `${widthInput.value}px`;
+            if (widthOutput) widthOutput.textContent = widthInput.value;
+        });
+
+        heightInput.addEventListener('input', () => {
+            box.style.height = `${heightInput.value}px`;
+            if (heightOutput) heightOutput.textContent = heightInput.value;
+        });
+
+        box.addEventListener('keydown', (event) => {
+            const rect = box.getBoundingClientRect();
+            let nextWidth = rect.width;
+            let nextHeight = rect.height;
+
+            switch (event.key) {
+                case 'ArrowLeft':
+                    nextWidth = clampSize(rect.width - KEYBOARD_STEP);
+                    break;
+                case 'ArrowRight':
+                    nextWidth = clampSize(rect.width + KEYBOARD_STEP);
+                    break;
+                case 'ArrowDown':
+                    nextHeight = clampSize(rect.height - KEYBOARD_STEP);
+                    break;
+                case 'ArrowUp':
+                    nextHeight = clampSize(rect.height + KEYBOARD_STEP);
+                    break;
+                default:
+                    return;
+            }
+
+            event.preventDefault();
+            box.style.width = `${nextWidth}px`;
+            box.style.height = `${nextHeight}px`;
+            widthInput.value = String(nextWidth);
+            heightInput.value = String(nextHeight);
+            if (widthOutput) widthOutput.textContent = String(nextWidth);
+            if (heightOutput) heightOutput.textContent = String(nextHeight);
+        });
+
+        observer.observe(box);
+    });
 </script>
 </body>
 </html>
