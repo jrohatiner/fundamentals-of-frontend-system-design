@@ -7,17 +7,10 @@
     <link rel="stylesheet" href="./index.css" />
   </head>
   <body>
-    <main class="container"></main>
+    <main id="container" class="container"></main>
   </body>
   <script>
     const container = document.getElementById("container");
-    <link rel="stylesheet" href="./index.css">
-</head>
-<body>
-<main id="container" class="container"></main>
-</body>
-<script>
-    const container = document.getElementById('container');
     const html = `<article class="card">
     <h3 class="card__title"></h3>
     <div class="card__body">
@@ -42,11 +35,8 @@
       "This is a random body text",
     );
 
-    container.appendChild(component);
-  </script>
-</html>
     if (component) {
-        container.appendChild(component);
+      container.appendChild(component);
     }
-</script>
+  </script>
 </html>
