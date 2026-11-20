@@ -1,8 +1,23 @@
 {
   "name": "fundamentals-of-frontend-system-design",
+  "version": "1.0.0",
   "private": true,
+  "description": "Workshop exercises for Fundamentals of Frontend System Design",
   "type": "module",
+  "engines": {
+    "node": ">=18.18.0"
+  },
   "scripts": {
-    "test": "node --test"
+    "test": "node --test",
+    "lint": "eslint --max-warnings=0 . && node scripts/check-syntax.mjs",
+    "format:check": "prettier --check package.json eslint.config.mjs AGENTS.md \".github/**/*.{yml,yaml}\" \"scripts/**/*.mjs\" && node scripts/check-format.mjs",
+    "validate": "npm run lint && npm run format:check"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.5",
+    "eslint": "^9.39.5",
+    "eslint-plugin-html": "^8.2.1",
+    "globals": "^15.15.0",
+    "prettier": "^3.10.1"
   }
 }
