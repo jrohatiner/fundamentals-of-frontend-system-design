@@ -2,12 +2,15 @@
 
 This a repo for the course published on Frontend Masters
 https://frontendmasters.com/workshops/systems-design/
+
 ## How to use the repo
+
 Check-out a specific branch as you follow the workshop exercises.
 Repo doesn't use any bundler or frameworks. So opening `index.html` in chrome
 is enough to complete workshop exercises
 
 ## Overview
+
 All exercise branches end with `begin` prefix. If you would like to see a solution
 to the exercise go to the branch with `end` prefix.
 

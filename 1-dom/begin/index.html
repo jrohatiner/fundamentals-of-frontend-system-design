@@ -1,16 +1,16 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Frontend System Design Fundamentals</title>
-    <link rel="stylesheet" href="../../styles/index.css">
-</head>
-<body>
-<main id="container"></main>
-</body>
-<script>
-    const container = document.getElementById('container');
+    <link rel="stylesheet" href="../../styles/index.css" />
+  </head>
+  <body>
+    <main id="container"></main>
+  </body>
+  <script>
+    const container = document.getElementById("container");
     const html = `<article class="card">
     <h3 class="card__title"></h3>
     <div class="card__body">
@@ -27,16 +27,16 @@
      * @return {HTMLElement
      */
     function createCardComponent(title, body) {
-        // @todo - Implement function
+      // @todo - Implement function
     }
 
     const component = createCardComponent(
-        "Frontend System Design: Fundamentals",
-        "This is a random body text"
+      "Frontend System Design: Fundamentals",
+      "This is a random body text",
     );
 
     if (component) {
-        container.appendChild(component);
+      container.appendChild(component);
     }
-</script>
+  </script>
 </html>
