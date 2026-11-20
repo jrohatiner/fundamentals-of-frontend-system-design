@@ -191,7 +191,6 @@
     const CIRCLE_THRESHOLD = 150;
 
     const statusRegion = document.getElementById('resize-status');
-    const shapeByBox = new WeakMap();
 
     function clampSize(value) {
         return Math.min(MAX_SIZE, Math.max(MIN_SIZE, Math.round(value)));
@@ -230,9 +229,19 @@
     const observer = new ResizeObserver((entries) => {
         for (const entry of entries) {
             const { borderBoxSize: [{ inlineSize, blockSize }], target } = entry;
-            const isCircle = inlineSize < CIRCLE_THRESHOLD && blockSize < CIRCLE_THRESHOLD;
+            syncControls(target, inlineSize, blockSize);
 
-            if (isCircle) {
+            const isSmall = inlineSize < CIRCLE_THRESHOLD && blockSize < CIRCLE_THRESHOLD;
+            const nextState = isSmall ? "true" : "false";
+            if (target.dataset.small === nextState) {
+                continue;
+            }
+            const isInitial = target.dataset.small === undefined;
+            target.dataset.small = nextState;
+            if (isInitial && !isSmall) {
+                continue;
+            }
+            if (isSmall) {
                 target.style.borderRadius = "100%";
                 target.style.borderWidth = "4px";
             } else {
@@ -240,17 +249,11 @@
                 target.style.borderWidth = "unset";
             }
 
-            syncControls(target, inlineSize, blockSize);
-
-            const nextShape = isCircle ? "circle" : "rectangle";
-            const previousShape = shapeByBox.get(target);
-            shapeByBox.set(target, nextShape);
-
-            if (previousShape !== undefined && previousShape !== nextShape) {
+            if (!isInitial) {
                 const label = target.dataset.label || target.getAttribute('aria-label') || 'Box';
                 const dims = `${Math.round(inlineSize)} by ${Math.round(blockSize)} pixels`;
                 announceStatus(
-                    isCircle
+                    isSmall
                         ? `${label} morphed into a circle (${dims}).`
                         : `${label} restored to a rectangle (${dims}).`
                 );
@@ -307,7 +310,7 @@
             if (heightOutput) heightOutput.textContent = String(nextHeight);
         });
 
-        observer.observe(box);
+        observer.observe(box, { box: 'border-box' });
     });
 </script>
 </body>
