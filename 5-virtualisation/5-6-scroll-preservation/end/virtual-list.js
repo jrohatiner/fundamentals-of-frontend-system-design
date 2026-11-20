@@ -15,6 +15,10 @@ function getContainer() {
     return document.getElementById('container');
 }
 
+function getStatus() {
+    return document.getElementById('virtual-list-status');
+}
+
 /**
  * Returns `data-y` attribute of the HTMLElement, if value is provided
  * additionally updates the attribute
@@ -31,6 +35,9 @@ function y(element, value = undefined) {
 }
 
 export class VirtualList {
+    #pendingLoads = 0;
+    #clearStatusTimer = null;
+
     /**
      * @param root {HTMLElement}
      * @param props {{
@@ -52,16 +59,18 @@ export class VirtualList {
     /**
      * Returns an HTML Representation of the component, should have the following structure:
      * #container >
-     *    .top-observer+
+     *    #virtual-list-status.sr-only+
+     *    #top-observer[aria-hidden="true"]+
      *    #virtual-list+
-     *    #bottom-observer
+     *    #bottom-observer[aria-hidden="true"]
      * @returns {string}
      */
     toHTML() {
         return `<div id="container">
-        <div id="top-observer">Top Observer</div>
+        <div id="virtual-list-status" class="sr-only" role="status" aria-live="polite"></div>
+        <div id="top-observer" aria-hidden="true">Top Observer</div>
         <main id="virtual-list"></main>
-        <div id="bottom-observer">Bottom Observer</div>
+        <div id="bottom-observer" aria-hidden="true">Bottom Observer</div>
         </div>`.trim();
     }
 
@@ -71,8 +80,53 @@ export class VirtualList {
      * @returns void
      */
     render() {
+        if (this.#clearStatusTimer !== null) {
+            clearTimeout(this.#clearStatusTimer);
+            this.#clearStatusTimer = null;
+        }
+        this.#pendingLoads = 0;
         this.root.innerHTML = this.toHTML();
         this.#effect()
+    }
+
+    /**
+     * @param message {string}
+     * @returns {void}
+     */
+    #updateStatus(message) {
+        const status = getStatus();
+        if (!status) {
+            return;
+        }
+        if (this.#clearStatusTimer !== null) {
+            clearTimeout(this.#clearStatusTimer);
+            this.#clearStatusTimer = null;
+        }
+        status.textContent = message;
+    }
+
+    /**
+     * @param delayMs {number}
+     * @returns {void}
+     */
+    #scheduleStatusClear(delayMs = 1500) {
+        const status = getStatus();
+        if (!status) {
+            return;
+        }
+        if (this.#clearStatusTimer !== null) {
+            clearTimeout(this.#clearStatusTimer);
+        }
+        this.#clearStatusTimer = setTimeout(() => {
+            this.#clearStatusTimer = null;
+            if (this.#pendingLoads === 0) {
+                const currentStatus = getStatus();
+                if (currentStatus) {
+                    currentStatus.textContent = '';
+                }
+            }
+        }, delayMs);
+        this.#clearStatusTimer?.unref?.();
     }
 
     /**
@@ -85,8 +139,12 @@ export class VirtualList {
                 if (entry.isIntersecting) {
                     const id = entry.target.id;
                     if (id === 'top-observer' && this.start > 0) {
+                        this.#pendingLoads++;
+                        this.#updateStatus('Loading previous items...');
                         void this.#handleTopObserver();
                     } else if (id === 'bottom-observer') {
+                        this.#pendingLoads++;
+                        this.#updateStatus('Loading more items...');
                         void this.#handleBottomObserver();
                     }
                 }
@@ -113,31 +171,52 @@ export class VirtualList {
     async #handleBottomObserver() {
         const container = getContainer();
         const list = getList();
-        const data = await this.props.getPage(this.end++);
-        if (!data?.length) {
-            this.end--;
-            return;
-        }
-        if (this.pool.length < this.poolLimit) {
-            const fragment = new DocumentFragment();
-            const elements = data.map(datum => this.props.getTemplate(datum))
-            elements.forEach(el => fragment.appendChild(el));
-            this.pool.push(...elements)
-            list.appendChild(fragment);
-        } else {
-            const [unchanged, recycled] = [
-                this.pool.slice(this.props.pageSize, this.pool.length),
-                this.pool.slice(0, this.props.pageSize)
-            ];
-            this.pool = [].concat(
-                unchanged,
-                recycled
+        try {
+            const data = await this.props.getPage(this.end++);
+            if (!data?.length) {
+                this.end--;
+                this.#pendingLoads = Math.max(0, this.#pendingLoads - 1);
+                if (this.#pendingLoads === 0) {
+                    this.#updateStatus('');
+                }
+                return;
+            }
+            if (this.pool.length < this.poolLimit) {
+                const fragment = new DocumentFragment();
+                const elements = data.map(datum => this.props.getTemplate(datum))
+                elements.forEach(el => fragment.appendChild(el));
+                this.pool.push(...elements)
+                list.appendChild(fragment);
+            } else {
+                const [unchanged, recycled] = [
+                    this.pool.slice(this.props.pageSize, this.pool.length),
+                    this.pool.slice(0, this.props.pageSize)
+                ];
+                this.pool = [].concat(
+                    unchanged,
+                    recycled
+                );
+                this.#updateData(recycled, data)
+                this.start++;
+            }
+            this.#updateElement("down");
+            container.style.height = `${container.scrollHeight}px`;
+            this.#pendingLoads = Math.max(0, this.#pendingLoads - 1);
+            this.#updateStatus(
+                this.#pendingLoads > 0
+                    ? `Loaded ${data.length} items. Loading more items...`
+                    : `Loaded ${data.length} items.`
             );
-            this.#updateData(recycled, data)
-            this.start++;
+            if (this.#pendingLoads === 0) {
+                this.#scheduleStatusClear();
+            }
+        } catch (error) {
+            this.#pendingLoads = Math.max(0, this.#pendingLoads - 1);
+            if (this.#pendingLoads === 0) {
+                this.#updateStatus('');
+            }
+            throw error;
         }
-        this.#updateElement("down");
-        container.style.height = `${container.scrollHeight}px`;
     }
 
     /**
@@ -145,18 +224,43 @@ export class VirtualList {
      * @returns Promise<void>
      */
     async #handleTopObserver() {
-        const data = await this.props.getPage(--this.start)
-        const [recycled, unchanged] = [
-            this.pool.slice(this.props.pageSize, this.pool.length),
-            this.pool.slice(0, this.props.pageSize)
-        ];
-        this.pool = [].concat(
-            recycled,
-            unchanged
-        );
-        this.#updateElement("up");
-        this.#updateData(recycled, data);
-        this.end--;
+        try {
+            const data = await this.props.getPage(--this.start)
+            if (!data?.length) {
+                this.start++;
+                this.#pendingLoads = Math.max(0, this.#pendingLoads - 1);
+                if (this.#pendingLoads === 0) {
+                    this.#updateStatus('');
+                }
+                return;
+            }
+            const [recycled, unchanged] = [
+                this.pool.slice(this.props.pageSize, this.pool.length),
+                this.pool.slice(0, this.props.pageSize)
+            ];
+            this.pool = [].concat(
+                recycled,
+                unchanged
+            );
+            this.#updateElement("up");
+            this.#updateData(recycled, data);
+            this.end--;
+            this.#pendingLoads = Math.max(0, this.#pendingLoads - 1);
+            this.#updateStatus(
+                this.#pendingLoads > 0
+                    ? `Loaded ${data.length} previous items. Loading items...`
+                    : `Loaded ${data.length} previous items.`
+            );
+            if (this.#pendingLoads === 0) {
+                this.#scheduleStatusClear();
+            }
+        } catch (error) {
+            this.#pendingLoads = Math.max(0, this.#pendingLoads - 1);
+            if (this.#pendingLoads === 0) {
+                this.#updateStatus('');
+            }
+            throw error;
+        }
     }
 
 

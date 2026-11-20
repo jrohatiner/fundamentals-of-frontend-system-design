@@ -30,7 +30,18 @@
     padding: 0 1rem;
 }
 
-#bottom-observer {
+.sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    clip-path: inset(50%);
+    white-space: nowrap;
+    border: 0;
+}
 #top-observer {
     background: rgba(0, 0, 255, 0.2);
     border: 2px dashed  rgba(0, 0, 255, 0.2);
@@ -46,7 +57,5 @@
     flex-direction: column;
     justify-content: center;
     align-items: center;
-    background: rgba(255, 0, 0, 0.2);
-    border: 2px dashed  rgba(255, 0, 0, 0.6);
     margin: 0 2rem;
 }

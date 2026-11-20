@@ -17,8 +17,9 @@
 </head>
 <body>
 <main id="container">
+    <div id="feed-status" class="sr-only" role="status" aria-live="polite"></div>
     <div id="list"></div>
-    <div id="bottom-observer">
+    <div id="bottom-observer" aria-hidden="true">
         Bottom Observer
     </div>
 </main>
@@ -38,6 +39,7 @@
     });
     const list = document.getElementById('list');
     const observerElement = document.getElementById('bottom-observer');
+    const statusElement = document.getElementById('feed-status');
 
     const mutationObserver = new MutationObserver((mutations) => {
         for (const {target, type} of mutations) {
@@ -46,8 +48,6 @@
                 type === 'characterData' &&
                 contentContainer?.isContentEditable &&
                 target.parentElement?.isContentEditable &&
-            if (
-                type === 'characterData' &&
                 SUPPORTED_ELEMENTS.has(target?.textContent)
             ) {
                 const element = getHeading(target);
@@ -57,22 +57,79 @@
         }
     });
     mutationObserver.observe(list, { characterData: true, subtree: true });
-    })
 
     let page = 0;
+    let pendingLoads = 0;
+    let clearStatusTimer = null;
+
+    function updateStatus(message) {
+        if (!statusElement) {
+            return;
+        }
+        if (clearStatusTimer !== null) {
+            clearTimeout(clearStatusTimer);
+            clearStatusTimer = null;
+        }
+        statusElement.textContent = message;
+    }
+
+    function scheduleStatusClear(delayMs = 1500) {
+        if (!statusElement) {
+            return;
+        }
+        if (clearStatusTimer !== null) {
+            clearTimeout(clearStatusTimer);
+        }
+        clearStatusTimer = setTimeout(() => {
+            clearStatusTimer = null;
+            if (pendingLoads === 0) {
+                statusElement.textContent = '';
+            }
+        }, delayMs);
+    }
+
     const observer = new IntersectionObserver(async ([bottom]) => {
         if (bottom.isIntersecting) {
+            pendingLoads++;
             observerElement.textContent = "Loading";
-            const data = await db.getPage(page++);
-            const fragment = new DocumentFragment();
-            data.forEach(({title, body}) => {
-                const card = createCardElement(title, body);
-                fragment.appendChild(card);
-                const content = card.querySelector('.card__body__content');
-                mutationObserver.observe(content, { characterData: true, subtree: true})
-            });
+            updateStatus("Loading more items...");
+            try {
+                const data = await db.getPage(page++);
+                if (!data?.length) {
+                    pendingLoads--;
+                    if (pendingLoads === 0) {
+                        observerElement.textContent = "Bottom Observer";
+                        updateStatus("");
+                    }
+                    return;
+                }
+                const fragment = new DocumentFragment();
+                data.forEach(({title, body}) => {
+                    const card = createCardElement(title, body);
+                    fragment.appendChild(card);
+                });
 
-            list.appendChild(fragment);
+                list.appendChild(fragment);
+                pendingLoads--;
+                if (pendingLoads === 0) {
+                    observerElement.textContent = "Bottom Observer";
+                }
+                updateStatus(
+                    pendingLoads > 0
+                        ? `Loaded ${data.length} items. Loading more items...`
+                        : `Loaded ${data.length} items.`
+                );
+                if (pendingLoads === 0) {
+                    scheduleStatusClear();
+                }
+            } catch (error) {
+                pendingLoads = Math.max(0, pendingLoads - 1);
+                if (pendingLoads === 0) {
+                    observerElement.textContent = "Bottom Observer";
+                    updateStatus("");
+                }
+                throw error;
+            }
         }
     }, {threshold: 0.1})
     observer.observe(observerElement);
