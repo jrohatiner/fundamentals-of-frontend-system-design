@@ -64,7 +64,16 @@
 <script type="module">
  const observer = new ResizeObserver((entries) => {
      for(let entry of entries) {
-         const {borderBoxSize: [{inlineSize, blockSize}], target} = entry;
+         const {target} = entry;
+         const boxSize = Array.isArray(entry.borderBoxSize)
+             ? entry.borderBoxSize[0]
+             : entry.borderBoxSize;
+         const inlineSize = boxSize && boxSize.inlineSize != null
+             ? boxSize.inlineSize
+             : entry.contentRect && entry.contentRect.width;
+         const blockSize = boxSize && boxSize.blockSize != null
+             ? boxSize.blockSize
+             : entry.contentRect && entry.contentRect.height;
          console.log(inlineSize, blockSize)
          if(inlineSize < 150 && blockSize < 150) {
             target.style.borderRadius = "100%";
