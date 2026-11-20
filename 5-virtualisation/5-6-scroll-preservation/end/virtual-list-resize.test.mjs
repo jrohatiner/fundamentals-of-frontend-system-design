@@ -439,7 +439,7 @@ describe("Browser integration: ResizeObserver text scaling, text spacing, and fo
                 proc.kill("SIGKILL");
                 await new Promise((resolve) => proc.once("exit", resolve));
             }
-            rmSync(userDataDir, { recursive: true, force: true });
+            rmSync(userDataDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
         });
 
         const debugPort = await new Promise((resolve, reject) => {
