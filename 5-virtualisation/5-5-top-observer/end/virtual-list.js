@@ -1,4 +1,7 @@
-import { intersectionObserver } from "../../../utils/observer.js";
+import {
+  intersectionObserver,
+  resizeObserver,
+} from "../../../utils/observer.js";
 import { MARGIN, getList, y } from "../../../utils/virtual-list-helpers.js";
 
 const getObservers = () => [
@@ -6,28 +9,42 @@ const getObservers = () => [
   document.getElementById("bottom-observer"),
 ];
 
-function getList() {
-  return document.getElementById("virtual-list");
-}
-
 /**
- * Returns `data-y` attribute of the HTMLElement, if value is provided
- * additionally updates the attribute
+ * Computes vertical separation between adjacent cards from computed CSS margins,
+ * scaling automatically with root font-size (rem) and custom spacing overrides.
  *
- * @param element {HTMLElement}
- * @param value {string | number}
- * @returns {?string}
+ * @param element {HTMLElement | undefined}
+ * @returns {number}
  */
-function y(element, value = undefined) {
-  if (value != null) {
-    element.setAttribute("data-y", value);
+function getVerticalMargin(element) {
+  if (typeof getComputedStyle === "function" && element) {
+    const style = getComputedStyle(element);
+    const marginTop = parseFloat(style?.marginTop);
+    const marginBottom = parseFloat(style?.marginBottom);
+    const maxMargin = Math.max(
+      Number.isFinite(marginTop) ? marginTop : 0,
+      Number.isFinite(marginBottom) ? marginBottom : 0,
+    );
+    if (maxMargin > 0) {
+      return maxMargin;
+    }
+    const root =
+      typeof document !== "undefined" ? document.documentElement : null;
+    if (root) {
+      const rootFontSize = parseFloat(getComputedStyle(root)?.fontSize);
+      if (Number.isFinite(rootFontSize) && rootFontSize > 0) {
+        return 2 * rootFontSize;
+      }
+    }
   }
-  return element.getAttribute("data-y");
-function getContainer() {
-  return document.getElementById("container");
+  return 2 * MARGIN;
 }
 
 export class VirtualList {
+  #resizeObserver = null;
+  #cardSizes = new WeakMap();
+  #rafId = null;
+
   /**
    * @param root {HTMLElement}
    * @param props {{
@@ -92,11 +109,126 @@ export class VirtualList {
   }
 
   /**
+   * Callback implementation for pooled card ResizeObserver
+   * @return {ResizeObserverCallback}
+   */
+  #handleResize() {
+    return (entries) => {
+      let changed = false;
+      for (const entry of entries) {
+        const borderBox = Array.isArray(entry.borderBoxSize)
+          ? entry.borderBoxSize[0]
+          : entry.borderBoxSize;
+        const inlineSize = borderBox?.inlineSize ?? entry.contentRect?.width;
+        const blockSize = borderBox?.blockSize ?? entry.contentRect?.height;
+        if (typeof blockSize === "number" && typeof inlineSize === "number") {
+          const prev = this.#cardSizes.get(entry.target);
+          if (
+            !prev ||
+            Math.abs(prev.blockSize - blockSize) > 0.01 ||
+            Math.abs(prev.inlineSize - inlineSize) > 0.01
+          ) {
+            this.#cardSizes.set(entry.target, { inlineSize, blockSize });
+            changed = true;
+          }
+        } else {
+          changed = true;
+        }
+      }
+      if (changed && this.pool.length > 0) {
+        this.#scheduleOffsetRecalculation();
+      }
+    };
+  }
+
+  /**
+   * Coalesces resize-driven offset recalculation into a single animation frame
+   * @return {void}
+   */
+  #scheduleOffsetRecalculation() {
+    if (this.#rafId != null) {
+      return;
+    }
+    const schedule =
+      typeof requestAnimationFrame === "function"
+        ? requestAnimationFrame
+        : (cb) => setTimeout(cb, 0);
+    this.#rafId = schedule(() => {
+      this.#rafId = null;
+      this.#recalculateOffsets();
+    });
+  }
+
+  /**
+   * Recalculates card and observer translateY offsets while batching reads before writes
+   * @return {void}
+   */
+  #recalculateOffsets() {
+    if (this.pool.length === 0) {
+      return;
+    }
+    const currentYValues = this.pool.map((el) => {
+      const currentY = y(el);
+      return currentY == null ? null : +currentY;
+    });
+    let positionedCount = 0;
+    while (
+      positionedCount < this.pool.length &&
+      currentYValues[positionedCount] != null
+    ) {
+      positionedCount++;
+    }
+    if (positionedCount === 0) {
+      return;
+    }
+
+    const [topObserver, bottomObserver] = getObservers();
+
+    // Phase 1: Batch all DOM geometry and computed style reads before any writes
+    const verticalMargin = getVerticalMargin(this.pool[0]);
+    const heights = new Array(positionedCount);
+    for (let i = 0; i < positionedCount; i++) {
+      const rect = this.pool[i].getBoundingClientRect();
+      heights[i] = rect.height;
+      this.#cardSizes.set(this.pool[i], {
+        inlineSize: rect.width,
+        blockSize: rect.height,
+      });
+    }
+
+    // Phase 2: Compute target vertical positions in memory
+    const targetY = new Array(positionedCount);
+    targetY[0] = this.start === 0 ? 0 : currentYValues[0];
+    for (let i = 1; i < positionedCount; i++) {
+      targetY[i] = targetY[i - 1] + heights[i - 1] + verticalMargin;
+    }
+    const lastIdx = positionedCount - 1;
+    const bottomObserverY =
+      targetY[lastIdx] + heights[lastIdx] + verticalMargin;
+
+    // Phase 3: Batch DOM attribute and transform writes
+    for (let i = 0; i < positionedCount; i++) {
+      if (Math.abs(currentYValues[i] - targetY[i]) > 0.01) {
+        const current = this.pool[i];
+        y(current, targetY[i]);
+        current.style.transform = `translateY(${targetY[i]}px)`;
+      }
+    }
+    if (topObserver) {
+      topObserver.style.transform = `translateY(${targetY[0]}px)`;
+    }
+    if (bottomObserver) {
+      bottomObserver.style.transform = `translateY(${bottomObserverY}px)`;
+    }
+  }
+
+  /**
    * Registers Events / Observers, this function is run after initial render
    * @returns void
    */
   #effect() {
     intersectionObserver(getObservers(), this.#handleIntersection(), {});
+    this.#resizeObserver = resizeObserver(this.pool, this.#handleResize());
   }
 
   /**
@@ -106,12 +238,17 @@ export class VirtualList {
   async #handleBottomObserver() {
     const list = getList();
     const data = await this.props.getPage(this.end++);
-    const fragment = new DocumentFragment();
-    const elements = data.map((datum) => this.props.getTemplate(datum));
-    elements.forEach((el) => fragment.appendChild(el));
+    if (!data?.length) {
+      this.end--;
+      return;
+    }
     if (this.pool.length < this.poolLimit) {
+      const fragment = new DocumentFragment();
+      const elements = data.map((datum) => this.props.getTemplate(datum));
+      elements.forEach((el) => fragment.appendChild(el));
       this.pool.push(...elements);
       list.appendChild(fragment);
+      elements.forEach((el) => this.#resizeObserver?.observe(el));
     } else {
       const [unchanged, recycled] = [
         this.pool.slice(this.props.pageSize, this.pool.length),
@@ -135,8 +272,8 @@ export class VirtualList {
       this.pool.slice(0, this.props.pageSize),
     ];
     this.pool = [...recycled, ...unchanged];
-    this.#updateElement("up");
     this.#updateData(recycled, data);
+    this.#updateElement("up");
     this.end--;
   }
 
@@ -148,42 +285,120 @@ export class VirtualList {
    * @return {void}
    */
   #updateElement(direction) {
+    if (this.pool.length === 0) {
+      return;
+    }
     const [topObserver, bottomObserver] = getObservers();
-    const start = direction === "down" ? 0 : this.props.pageSize - 1;
+    const yValues = this.pool.map((el) => {
+      const currentY = y(el);
+      return currentY == null ? null : +currentY;
+    });
+    const shouldTransform = this.pool.map((el) => Boolean(el.style.transform));
+
+    const lastIndex = this.pool.length - 1;
+    const recycledStart = this.pool.length - this.props.pageSize;
+    const isPoolFull =
+      this.pool.length >= this.poolLimit &&
+      recycledStart > 0 &&
+      yValues[recycledStart - 1] != null;
+
+    const start =
+      direction === "down"
+        ? isPoolFull
+          ? recycledStart
+          : 0
+        : Math.min(this.props.pageSize - 1, lastIndex);
     const end = direction === "down" ? this.pool.length : 0;
+
+    // Phase 1: Batch DOM geometry reads before any style or attribute mutations
+    const verticalMargin = getVerticalMargin(this.pool[0]);
+    const heights = new Array(this.pool.length);
+    if (direction === "down") {
+      for (let i = Math.max(0, start - 1); i < end; i++) {
+        const rect = this.pool[i].getBoundingClientRect();
+        heights[i] = rect.height;
+        this.#cardSizes.set(this.pool[i], {
+          inlineSize: rect.width,
+          blockSize: rect.height,
+        });
+      }
+    } else {
+      const measureEnd = Math.min(lastIndex, start + 1);
+      for (let i = 0; i <= measureEnd; i++) {
+        const rect = this.pool[i].getBoundingClientRect();
+        heights[i] = rect.height;
+        this.#cardSizes.set(this.pool[i], {
+          inlineSize: rect.width,
+          blockSize: rect.height,
+        });
+      }
+    }
+    if (heights[lastIndex] === undefined) {
+      const rect = this.pool[lastIndex].getBoundingClientRect();
+      heights[lastIndex] = rect.height;
+      this.#cardSizes.set(this.pool[lastIndex], {
+        inlineSize: rect.width,
+        blockSize: rect.height,
+      });
+    }
+
+    // Phase 2: Compute target vertical positions in memory
+    let shiftedAll = false;
     if (direction === "down") {
       for (let i = start; i < end; i++) {
-        const [prev, current] = [this.pool.at(i - 1), this.pool[i]];
-        if (y(prev) == null) {
-          y(current, "0");
+        if (i === 0 || yValues[i - 1] == null) {
+          yValues[i] = 0;
         } else {
-          const previousY = +y(prev);
-          const previousHeight = prev.getBoundingClientRect().height;
-          const yPos = previousY + (previousHeight + 2 * MARGIN);
-          y(current, yPos);
-          current.style.transform = `translateY(${yPos}px)`;
+          yValues[i] = yValues[i - 1] + (heights[i - 1] + verticalMargin);
+          shouldTransform[i] = true;
         }
       }
     } else {
       for (let i = start; i >= end; i--) {
-        const [prev, current] = [this.pool.at(i + 1), this.pool[i]];
-        if (y(prev) == null) {
-          y(current, "0");
+        if (i + 1 >= this.pool.length || yValues[i + 1] == null) {
+          yValues[i] = 0;
         } else {
-          const previousY = +y(prev);
-          const previousHeight = prev.getBoundingClientRect().height;
-          const yPos = previousY - (previousHeight + 2 * MARGIN);
-          y(current, yPos);
+          yValues[i] = yValues[i + 1] - (heights[i] + verticalMargin);
+          shouldTransform[i] = true;
+        }
+      }
+      if (yValues[0] < 0) {
+        const underflowShift = -yValues[0];
+        for (let i = 0; i <= lastIndex; i++) {
+          if (yValues[i] != null) {
+            yValues[i] += underflowShift;
+            shouldTransform[i] = true;
+          }
+        }
+        shiftedAll = true;
+      }
+    }
+
+    // Phase 3: Batch DOM attribute and transform writes
+    if (direction === "down") {
+      for (let i = start; i < end; i++) {
+        const current = this.pool[i];
+        const yPos = yValues[i];
+        y(current, yPos);
+        if (shouldTransform[i]) {
+          current.style.transform = `translateY(${yPos}px)`;
+        }
+      }
+    } else {
+      const writeStart = shiftedAll ? lastIndex : start;
+      for (let i = writeStart; i >= end; i--) {
+        const current = this.pool[i];
+        const yPos = yValues[i];
+        y(current, yPos);
+        if (shouldTransform[i]) {
           current.style.transform = `translateY(${yPos}px)`;
         }
       }
     }
-    topObserver.style.transform = `translateY(${+y(this.pool[0])}px)`;
-    const lastElement = this.pool.at(-1);
+
+    topObserver.style.transform = `translateY(${yValues[0]}px)`;
     const bottomObserverY =
-      +lastElement.getAttribute("data-y") +
-      lastElement.getBoundingClientRect().height +
-      MARGIN * 2;
+      yValues[lastIndex] + heights[lastIndex] + verticalMargin;
     bottomObserver.style.transform = `translateY(${bottomObserverY}px)`;
   }
 

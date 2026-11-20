@@ -1,4 +1,7 @@
-import { intersectionObserver } from "../../../utils/observer.js";
+import {
+  intersectionObserver,
+  resizeObserver,
+} from "../../../utils/observer.js";
 import { MARGIN, getList, y } from "../../../utils/virtual-list-helpers.js";
 
 const getObservers = () => [
@@ -11,11 +14,16 @@ function getContainer() {
 }
 
 function syncContainerHeight(container) {
-  if (!container) {
-    return;
+  if (!container || !("scrollHeight" in container)) {
+    return 0;
   }
+  container.style.minHeight = "";
   container.style.height = "";
-  container.style.height = `${container.scrollHeight}px`;
+  const scrollHeight = container.scrollHeight;
+  const nextHeight = `${scrollHeight}px`;
+  container.style.height = nextHeight;
+  container.style.minHeight = nextHeight;
+  return scrollHeight;
 }
 
 function adjustWindowScroll(scrollDelta) {
@@ -30,23 +38,44 @@ function adjustWindowScroll(scrollDelta) {
 }
 
 /**
- * Returns `data-y` attribute of the HTMLElement, if value is provided
- * additionally updates the attribute
+ * Computes vertical separation between adjacent cards from computed CSS margins,
+ * scaling automatically with root font-size (rem) and custom spacing overrides.
  *
- * @param element {HTMLElement}
- * @param value {string | number}
- * @returns {?string}
+ * @param element {HTMLElement | undefined}
+ * @returns {number}
  */
-function y(element, value = undefined) {
-  if (value != null) {
-    element.setAttribute("data-y", value);
+function getVerticalMargin(element) {
+  if (typeof getComputedStyle === "function" && element) {
+    const style = getComputedStyle(element);
+    const marginTop = parseFloat(style?.marginTop);
+    const marginBottom = parseFloat(style?.marginBottom);
+    const maxMargin = Math.max(
+      Number.isFinite(marginTop) ? marginTop : 0,
+      Number.isFinite(marginBottom) ? marginBottom : 0,
+    );
+    if (maxMargin > 0) {
+      return maxMargin;
+    }
+    const root =
+      typeof document !== "undefined" ? document.documentElement : null;
+    if (root) {
+      const rootFontSize = parseFloat(getComputedStyle(root)?.fontSize);
+      if (Number.isFinite(rootFontSize) && rootFontSize > 0) {
+        return 2 * rootFontSize;
+      }
+    }
   }
+  return 2 * MARGIN;
 }
 
 export class VirtualList {
   #hasMore = true;
   #isLoading = false;
   #onScroll = null;
+  #resizeObserver = null;
+  #cardSizes = new WeakMap();
+  #rafId = null;
+  #minContainerHeight = 0;
 
   get hasMore() {
     return this.#hasMore;
@@ -107,6 +136,9 @@ export class VirtualList {
    * @returns void
    */
   render() {
+    this.#hasMore = true;
+    this.#isLoading = false;
+    this.#minContainerHeight = 0;
     this.root.innerHTML = this.toHTML();
     this.#effect();
   }
@@ -137,16 +169,149 @@ export class VirtualList {
   }
 
   /**
+   * Callback implementation for pooled card ResizeObserver
+   * @return {ResizeObserverCallback}
+   */
+  #handleResize() {
+    return (entries) => {
+      let changed = false;
+      for (const entry of entries) {
+        const borderBox = Array.isArray(entry.borderBoxSize)
+          ? entry.borderBoxSize[0]
+          : entry.borderBoxSize;
+        const inlineSize = borderBox?.inlineSize ?? entry.contentRect?.width;
+        const blockSize = borderBox?.blockSize ?? entry.contentRect?.height;
+        if (typeof blockSize === "number" && typeof inlineSize === "number") {
+          const prev = this.#cardSizes.get(entry.target);
+          if (
+            !prev ||
+            Math.abs(prev.blockSize - blockSize) > 0.01 ||
+            Math.abs(prev.inlineSize - inlineSize) > 0.01
+          ) {
+            this.#cardSizes.set(entry.target, { inlineSize, blockSize });
+            changed = true;
+          }
+        } else {
+          changed = true;
+        }
+      }
+      if (changed && this.pool.length > 0) {
+        this.#scheduleOffsetRecalculation();
+      }
+    };
+  }
+
+  /**
+   * Coalesces resize-driven offset recalculation into a single animation frame
+   * @return {void}
+   */
+  #scheduleOffsetRecalculation() {
+    if (this.#rafId != null) {
+      return;
+    }
+    const schedule =
+      typeof requestAnimationFrame === "function"
+        ? requestAnimationFrame
+        : (cb) => setTimeout(cb, 0);
+    this.#rafId = schedule(() => {
+      this.#rafId = null;
+      this.#recalculateOffsets();
+    });
+  }
+
+  /**
+   * Recalculates card and observer translateY offsets and grows #container min-height
+   * while batching all geometry reads before DOM writes.
+   * @return {void}
+   */
+  #recalculateOffsets() {
+    if (this.pool.length === 0) {
+      return;
+    }
+    const currentYValues = this.pool.map((el) => {
+      const currentY = y(el);
+      return currentY == null ? null : +currentY;
+    });
+    let positionedCount = 0;
+    while (
+      positionedCount < this.pool.length &&
+      currentYValues[positionedCount] != null
+    ) {
+      positionedCount++;
+    }
+    if (positionedCount === 0) {
+      return;
+    }
+
+    const container = getContainer();
+    const [topObserver, bottomObserver] = getObservers();
+
+    // Phase 1: Batch all DOM geometry and computed style reads before any writes
+    const verticalMargin = getVerticalMargin(this.pool[0]);
+    const heights = new Array(positionedCount);
+    for (let i = 0; i < positionedCount; i++) {
+      const rect = this.pool[i].getBoundingClientRect();
+      heights[i] = rect.height;
+      this.#cardSizes.set(this.pool[i], {
+        inlineSize: rect.width,
+        blockSize: rect.height,
+      });
+    }
+    const topObserverHeight = topObserver
+      ? topObserver.getBoundingClientRect().height
+      : 0;
+    const bottomObserverHeight = bottomObserver
+      ? bottomObserver.getBoundingClientRect().height
+      : 0;
+
+    // Phase 2: Compute target vertical positions in memory
+    const targetY = new Array(positionedCount);
+    targetY[0] = this.start === 0 ? 0 : currentYValues[0];
+    for (let i = 1; i < positionedCount; i++) {
+      targetY[i] = targetY[i - 1] + heights[i - 1] + verticalMargin;
+    }
+    const lastIdx = positionedCount - 1;
+    const bottomObserverY =
+      targetY[lastIdx] + heights[lastIdx] + verticalMargin;
+    const requiredHeight =
+      topObserverHeight + bottomObserverY + bottomObserverHeight;
+
+    // Phase 3: Batch DOM attribute, transform, and min-height writes
+    for (let i = 0; i < positionedCount; i++) {
+      if (Math.abs(currentYValues[i] - targetY[i]) > 0.01) {
+        const current = this.pool[i];
+        y(current, targetY[i]);
+        current.style.transform = `translateY(${targetY[i]}px)`;
+      }
+    }
+    if (topObserver) {
+      topObserver.style.transform = `translateY(${targetY[0]}px)`;
+    }
+    if (bottomObserver) {
+      bottomObserver.style.transform = `translateY(${bottomObserverY}px)`;
+    }
+    if (container && requiredHeight > this.#minContainerHeight) {
+      this.#minContainerHeight = requiredHeight;
+      container.style.minHeight = `${this.#minContainerHeight}px`;
+      if (container.style.height) {
+        container.style.height = `${this.#minContainerHeight}px`;
+      }
+    }
+  }
+
+  /**
    * Registers Events / Observers, this function is run after initial render
    * @returns void
    */
   #effect() {
-    this.observer?.disconnect();
+    this.observer?.disconnect?.();
     this.observer = intersectionObserver(
       getObservers(),
       this.#handleIntersection(),
       {},
     );
+    this.#resizeObserver?.disconnect?.();
+    this.#resizeObserver = resizeObserver(this.pool, this.#handleResize());
     if (
       typeof window !== "undefined" &&
       typeof window.addEventListener === "function"
@@ -204,6 +369,7 @@ export class VirtualList {
         elements.forEach((el) => fragment.appendChild(el));
         this.pool.push(...elements);
         list.appendChild(fragment);
+        elements.forEach((el) => this.#resizeObserver?.observe(el));
       } else {
         const [unchanged, recycled] = [
           this.pool.slice(this.props.pageSize, this.pool.length),
@@ -211,12 +377,14 @@ export class VirtualList {
         ];
         this.#blurActiveInRecycled(recycled);
         this.pool = [...unchanged, ...recycled];
-        this.pool = [].concat(unchanged, recycled);
         this.#updateData(recycled, data);
         this.start++;
       }
       this.#updateElement("down");
-      syncContainerHeight(container);
+      const syncedHeight = syncContainerHeight(container);
+      if (syncedHeight > 0) {
+        this.#minContainerHeight = syncedHeight;
+      }
     } finally {
       this.#isLoading = false;
     }
@@ -249,7 +417,6 @@ export class VirtualList {
       ];
       this.#blurActiveInRecycled(recycled);
       this.pool = [...recycled, ...unchanged];
-      this.pool = [].concat(recycled, unchanged);
       this.#updateData(recycled, data);
       const { anchorDelta, topY } = this.#updateElement("up", recycleCount);
       this.end--;
@@ -262,21 +429,25 @@ export class VirtualList {
         }
       }
 
+      let syncedHeight = 0;
       if (typeof window !== "undefined") {
         const currentScrollY = window.scrollY ?? 0;
         const targetScrollY = Math.max(topY, currentScrollY + anchorDelta);
         const scrollDelta = targetScrollY - currentScrollY;
         if (scrollDelta > 0) {
-          syncContainerHeight(container);
+          syncedHeight = syncContainerHeight(container);
           adjustWindowScroll(scrollDelta);
         } else {
           if (scrollDelta < 0) {
             adjustWindowScroll(scrollDelta);
           }
-          syncContainerHeight(container);
+          syncedHeight = syncContainerHeight(container);
         }
       } else {
-        syncContainerHeight(container);
+        syncedHeight = syncContainerHeight(container);
+      }
+      if (syncedHeight > 0) {
+        this.#minContainerHeight = syncedHeight;
       }
     } finally {
       this.#isLoading = false;
@@ -325,6 +496,7 @@ export class VirtualList {
     if (this.pool.length === 0) {
       return { prependedHeight: 0, anchorDelta: 0, topY: 0 };
     }
+    const container = getContainer();
     const [topObserver, bottomObserver] = getObservers();
     const yValues = this.pool.map((el) => {
       const currentY = y(el);
@@ -348,19 +520,43 @@ export class VirtualList {
     const end = direction === "down" ? this.pool.length : 0;
 
     // Phase 1: Batch DOM geometry reads before any style or attribute mutations
+    const verticalMargin = getVerticalMargin(this.pool[0]);
     const heights = new Array(this.pool.length);
     if (direction === "down") {
       for (let i = Math.max(0, start - 1); i < end; i++) {
-        heights[i] = this.pool[i].getBoundingClientRect().height;
+        const rect = this.pool[i].getBoundingClientRect();
+        heights[i] = rect.height;
+        this.#cardSizes.set(this.pool[i], {
+          inlineSize: rect.width,
+          blockSize: rect.height,
+        });
       }
     } else {
       for (let i = end; i <= start; i++) {
-        heights[i] = this.pool[i].getBoundingClientRect().height;
+        const rect = this.pool[i].getBoundingClientRect();
+        heights[i] = rect.height;
+        this.#cardSizes.set(this.pool[i], {
+          inlineSize: rect.width,
+          blockSize: rect.height,
+        });
       }
     }
     if (heights[lastIndex] === undefined) {
-      heights[lastIndex] = this.pool[lastIndex].getBoundingClientRect().height;
+      const rect = this.pool[lastIndex].getBoundingClientRect();
+      heights[lastIndex] = rect.height;
+      this.#cardSizes.set(this.pool[lastIndex], {
+        inlineSize: rect.width,
+        blockSize: rect.height,
+      });
     }
+    const topObserverHeight =
+      direction === "down" && topObserver
+        ? topObserver.getBoundingClientRect().height
+        : 0;
+    const bottomObserverHeight =
+      direction === "down" && bottomObserver
+        ? bottomObserver.getBoundingClientRect().height
+        : 0;
 
     // Phase 2: Compute target vertical positions in memory
     let prependedHeight = 0;
@@ -372,13 +568,13 @@ export class VirtualList {
         if (i === 0 || yValues[i - 1] == null) {
           yValues[i] = 0;
         } else {
-          yValues[i] = yValues[i - 1] + (heights[i - 1] + 2 * MARGIN);
+          yValues[i] = yValues[i - 1] + (heights[i - 1] + verticalMargin);
           shouldTransform[i] = true;
         }
       }
     } else {
       for (let i = end; i <= start; i++) {
-        prependedHeight += heights[i] + 2 * MARGIN;
+        prependedHeight += heights[i] + verticalMargin;
       }
       const anchorIndex = start + 1;
       const hasAnchor =
@@ -394,7 +590,7 @@ export class VirtualList {
         shouldTransform[end] = true;
       }
       for (let i = end + 1; i <= start; i++) {
-        yValues[i] = yValues[i - 1] + (heights[i - 1] + 2 * MARGIN);
+        yValues[i] = yValues[i - 1] + (heights[i - 1] + verticalMargin);
         shouldTransform[i] = true;
       }
 
@@ -413,7 +609,12 @@ export class VirtualList {
       }
     }
 
-    // Phase 3: Batch DOM attribute and transform writes
+    const bottomObserverY =
+      yValues[lastIndex] + heights[lastIndex] + verticalMargin;
+    const requiredHeight =
+      topObserverHeight + bottomObserverY + bottomObserverHeight;
+
+    // Phase 3: Batch DOM attribute, transform, and container min-height writes
     if (direction === "down") {
       for (let i = start; i < end; i++) {
         const current = this.pool[i];
@@ -435,9 +636,15 @@ export class VirtualList {
     }
 
     topObserver.style.transform = `translateY(${yValues[0]}px)`;
-    const bottomObserverY =
-      yValues[lastIndex] + heights[lastIndex] + MARGIN * 2;
     bottomObserver.style.transform = `translateY(${bottomObserverY}px)`;
+    if (
+      direction === "down" &&
+      container &&
+      requiredHeight > this.#minContainerHeight
+    ) {
+      this.#minContainerHeight = requiredHeight;
+      container.style.minHeight = `${this.#minContainerHeight}px`;
+    }
 
     return {
       prependedHeight,
