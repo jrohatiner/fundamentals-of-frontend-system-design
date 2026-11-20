@@ -6,6 +6,8 @@ const getObservers = () => [
   document.getElementById("bottom-observer"),
 ];
 
+function getList() {
+  return document.getElementById("virtual-list");
 function getContainer() {
   return document.getElementById("container");
 }
