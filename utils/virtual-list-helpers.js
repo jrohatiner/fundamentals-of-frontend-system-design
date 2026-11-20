@@ -4,7 +4,7 @@ export const MARGIN = 16;
  * @return {HTMLElement | null}
  */
 export function getList() {
-    return document.getElementById('virtual-list');
+  return document.getElementById("virtual-list");
 }
 
 /**
@@ -16,8 +16,8 @@ export function getList() {
  * @return {string | null | undefined}
  */
 export function y(element, value = undefined) {
-    if (value != null) {
-        element?.setAttribute('data-y', value);
-    }
-    return element?.getAttribute('data-y');
+  if (value != null) {
+    element?.setAttribute("data-y", value);
+  }
+  return element?.getAttribute("data-y");
 }
