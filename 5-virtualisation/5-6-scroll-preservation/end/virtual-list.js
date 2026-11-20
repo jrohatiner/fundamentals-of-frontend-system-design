@@ -35,10 +35,27 @@ function y(element, value = undefined) {
 }
 
 export class VirtualList {
+    #hasMore = true;
     #isLoading = false;
     #pendingLoads = 0;
     #setSize = -1;
     #maxKnownItems = 0;
+
+    get hasMore() {
+        return this.#hasMore;
+    }
+
+    set hasMore(value) {
+        this.#hasMore = Boolean(value);
+    }
+
+    get isLoading() {
+        return this.#isLoading;
+    }
+
+    set isLoading(value) {
+        this.#isLoading = Boolean(value);
+    }
 
     /**
      * @param root {HTMLElement}
@@ -58,10 +75,9 @@ export class VirtualList {
         this.root = root;
         this.pool = [];
         this.poolLimit = this.props.pageSize * 2;
-        this.hasMore = true;
-        this.isLoading = false;
-        this.observer = null;
+        this.#hasMore = true;
         this.#isLoading = false;
+        this.observer = null;
         const configuredSize = this.props.setSize ?? this.props.totalItems;
         if (Number.isInteger(configuredSize) && configuredSize > 0) {
             this.#setSize = configuredSize;
@@ -114,18 +130,18 @@ export class VirtualList {
      */
     #handleIntersection() {
         return (entries) => {
-            if (this.#isLoading || this.isLoading) {
+            if (this.#isLoading) {
                 return;
             }
             for (const entry of entries) {
-                if (this.#isLoading || this.isLoading) {
+                if (this.#isLoading) {
                     return;
                 }
                 if (entry.isIntersecting) {
                     const id = entry.target.id;
                     if (id === 'top-observer' && this.start > 0) {
                         void this.#handleTopObserver().catch(() => {});
-                    } else if (id === 'bottom-observer' && this.hasMore) {
+                    } else if (id === 'bottom-observer' && this.#hasMore) {
                         void this.#handleBottomObserver().catch(() => {});
                     }
                 }
@@ -151,11 +167,10 @@ export class VirtualList {
      * @returns Promise<void>
      */
     async #handleBottomObserver() {
-        if (this.#isLoading || this.isLoading || !this.hasMore) {
+        if (!this.#hasMore || this.#isLoading) {
             return;
         }
         this.#isLoading = true;
-        this.isLoading = true;
         const container = getContainer();
         const list = getList();
         const pageIndex = this.end;
@@ -164,7 +179,7 @@ export class VirtualList {
         try {
             const data = await this.props.getPage(pageIndex);
             if (!Array.isArray(data) || data.length === 0) {
-                this.hasMore = false;
+                this.#hasMore = false;
                 const [, bottomObserver] = getObservers();
                 if (bottomObserver) {
                     this.observer?.unobserve?.(bottomObserver);
@@ -174,6 +189,20 @@ export class VirtualList {
                     this.#syncPoolSetSize();
                 }
                 return;
+            }
+            if (data.length < this.props.pageSize) {
+                this.#hasMore = false;
+                const [, bottomObserver] = getObservers();
+                if (bottomObserver) {
+                    this.observer?.unobserve?.(bottomObserver);
+                }
+                if (this.pool.length >= this.poolLimit) {
+                    if (this.#setSize === -1) {
+                        this.#setSize = pageIndex * this.props.pageSize + data.length;
+                        this.#syncPoolSetSize();
+                    }
+                    return;
+                }
             }
             this.end++;
             const basePosInSet = pageIndex * this.props.pageSize + 1;
@@ -218,7 +247,6 @@ export class VirtualList {
             if (!busyReleased) {
                 this.#endLoad(list);
             }
-            this.isLoading = false;
             this.#isLoading = false;
         }
     }
@@ -228,11 +256,10 @@ export class VirtualList {
      * @returns Promise<void>
      */
     async #handleTopObserver() {
-        if (this.#isLoading || this.isLoading) {
+        if (this.start <= 0 || this.#isLoading) {
             return;
         }
         this.#isLoading = true;
-        this.isLoading = true;
         const list = getList();
         const pageIndex = this.start - 1;
         let busyReleased = false;
@@ -256,8 +283,9 @@ export class VirtualList {
             this.#updateElement("up");
             this.#updateData(recycled, data, basePosInSet);
             this.end--;
-            if (!this.hasMore) {
-                this.hasMore = true;
+            const wasExhausted = !this.#hasMore;
+            this.#hasMore = true;
+            if (wasExhausted) {
                 const [, bottomObserver] = getObservers();
                 if (bottomObserver) {
                     this.observer?.observe?.(bottomObserver);
@@ -270,7 +298,6 @@ export class VirtualList {
             if (!busyReleased) {
                 this.#endLoad(list);
             }
-            this.isLoading = false;
             this.#isLoading = false;
         }
     }
@@ -375,12 +402,13 @@ export class VirtualList {
      * @return {void}
      */
     #updateData(elements, data, basePosInSet) {
-        const count = Math.min(elements.length, data.length);
         const setSize = this.#setSize;
-        for (let i = 0; i < count; i++) {
-            const posInSet = basePosInSet + i;
-            this.props.updateTemplate(elements[i], data[i], { posInSet, setSize });
-            this.#applyItemAria(elements[i], posInSet, setSize);
+        for (let i = 0; i < elements.length; i++) {
+            if (data?.[i] !== undefined) {
+                const posInSet = basePosInSet + i;
+                this.props.updateTemplate(elements[i], data[i], { posInSet, setSize });
+                this.#applyItemAria(elements[i], posInSet, setSize);
+            }
         }
     }
 
