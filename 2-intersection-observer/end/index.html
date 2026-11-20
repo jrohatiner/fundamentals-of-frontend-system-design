@@ -53,11 +53,12 @@
     const observer = new IntersectionObserver(async ([entry]) => {
         if (entry.isIntersecting && !isLoading) {
             isLoading = true;
+            observerElement.textContent = "Loading";
             try {
                 const data = await db.getPage(page++);
                 if (data.length === 0) {
+                    observerElement.textContent = "End of feed";
                     observer.unobserve(observerElement);
-                    observerElement.textContent = "No more items to load";
                     return;
                 }
                 const fragment = new DocumentFragment();
@@ -66,6 +67,7 @@
                     fragment.appendChild(card);
                 });
                 list.appendChild(fragment);
+                observerElement.textContent = "Bottom Observer";
             } finally {
                 isLoading = false;
             }

@@ -47,8 +47,6 @@
                 type === 'characterData' &&
                 contentContainer?.isContentEditable &&
                 target.parentElement?.isContentEditable &&
-            if (
-                type === 'characterData' &&
                 SUPPORTED_ELEMENTS.has(target?.textContent)
             ) {
                 const element = getHeading(target);
@@ -58,22 +56,31 @@
         }
     });
     mutationObserver.observe(list, { characterData: true, subtree: true });
-    })
 
     let page = 0;
+    let isLoading = false;
     const observer = new IntersectionObserver(async ([bottom]) => {
-        if (bottom.isIntersecting) {
+        if (bottom.isIntersecting && !isLoading) {
+            isLoading = true;
             observerElement.textContent = "Loading";
-            const data = await db.getPage(page++);
-            const fragment = new DocumentFragment();
-            data.forEach(({title, body}) => {
-                const card = createCardElement(title, body);
-                fragment.appendChild(card);
-                const content = card.querySelector('.card__body__content');
-                mutationObserver.observe(content, { characterData: true, subtree: true})
-            });
+            try {
+                const data = await db.getPage(page++);
+                if (data.length === 0) {
+                    observerElement.textContent = "End of feed";
+                    observer.unobserve(observerElement);
+                    return;
+                }
+                const fragment = new DocumentFragment();
+                data.forEach(({title, body}) => {
+                    const card = createCardElement(title, body);
+                    fragment.appendChild(card);
+                });
 
-            list.appendChild(fragment);
+                list.appendChild(fragment);
+                observerElement.textContent = "Bottom Observer";
+            } finally {
+                isLoading = false;
+            }
         }
     }, {threshold: 0.1})
     observer.observe(observerElement);
