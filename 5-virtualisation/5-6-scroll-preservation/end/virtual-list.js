@@ -10,6 +10,10 @@ function getContainer() {
   return document.getElementById("container");
 }
 
+function getStatus() {
+  return document.getElementById("virtual-list-status");
+}
+
 function syncContainerHeight(container) {
   if (!container) {
     return;
@@ -29,24 +33,11 @@ function adjustWindowScroll(scrollDelta) {
   }
 }
 
-/**
- * Returns `data-y` attribute of the HTMLElement, if value is provided
- * additionally updates the attribute
- *
- * @param element {HTMLElement}
- * @param value {string | number}
- * @returns {?string}
- */
-function y(element, value = undefined) {
-  if (value != null) {
-    element.setAttribute("data-y", value);
-  }
-}
-
 export class VirtualList {
   #hasMore = true;
   #isLoading = false;
   #onScroll = null;
+  #clearStatusTimer = null;
 
   get hasMore() {
     return this.#hasMore;
@@ -88,16 +79,18 @@ export class VirtualList {
   /**
    * Returns an HTML Representation of the component, should have the following structure:
    * #container >
-   *    .top-observer+
+   *    #virtual-list-status.sr-only+
+   *    #top-observer[aria-hidden="true"]+
    *    #virtual-list+
-   *    #bottom-observer
+   *    #bottom-observer[aria-hidden="true"]
    * @returns {string}
    */
   toHTML() {
     return `<div id="container">
-        <div id="top-observer">Top Observer</div>
+        <div id="virtual-list-status" class="sr-only" role="status" aria-live="polite"></div>
+        <div id="top-observer" aria-hidden="true">Top Observer</div>
         <main id="virtual-list"></main>
-        <div id="bottom-observer">Bottom Observer</div>
+        <div id="bottom-observer" aria-hidden="true">Bottom Observer</div>
         </div>`.trim();
   }
 
@@ -107,8 +100,54 @@ export class VirtualList {
    * @returns void
    */
   render() {
+    if (this.#clearStatusTimer !== null) {
+      clearTimeout(this.#clearStatusTimer);
+      this.#clearStatusTimer = null;
+    }
+    this.#hasMore = true;
+    this.#isLoading = false;
     this.root.innerHTML = this.toHTML();
     this.#effect();
+  }
+
+  /**
+   * @param message {string}
+   * @returns {void}
+   */
+  #updateStatus(message) {
+    const status = getStatus();
+    if (!status) {
+      return;
+    }
+    if (this.#clearStatusTimer !== null) {
+      clearTimeout(this.#clearStatusTimer);
+      this.#clearStatusTimer = null;
+    }
+    status.textContent = message;
+  }
+
+  /**
+   * @param delayMs {number}
+   * @returns {void}
+   */
+  #scheduleStatusClear(delayMs = 1500) {
+    const status = getStatus();
+    if (!status) {
+      return;
+    }
+    if (this.#clearStatusTimer !== null) {
+      clearTimeout(this.#clearStatusTimer);
+    }
+    this.#clearStatusTimer = setTimeout(() => {
+      this.#clearStatusTimer = null;
+      if (!this.#isLoading) {
+        const currentStatus = getStatus();
+        if (currentStatus) {
+          currentStatus.textContent = "";
+        }
+      }
+    }, delayMs);
+    this.#clearStatusTimer?.unref?.();
   }
 
   /**
@@ -175,6 +214,7 @@ export class VirtualList {
       return;
     }
     this.#isLoading = true;
+    this.#updateStatus("Loading more items...");
     try {
       const container = getContainer();
       const list = getList();
@@ -185,6 +225,7 @@ export class VirtualList {
         if (bottomObserver) {
           this.observer?.unobserve?.(bottomObserver);
         }
+        this.#updateStatus("");
         return;
       }
       if (data.length < this.props.pageSize) {
@@ -194,6 +235,7 @@ export class VirtualList {
           this.observer?.unobserve?.(bottomObserver);
         }
         if (this.pool.length >= this.poolLimit) {
+          this.#updateStatus("");
           return;
         }
       }
@@ -211,12 +253,16 @@ export class VirtualList {
         ];
         this.#blurActiveInRecycled(recycled);
         this.pool = [...unchanged, ...recycled];
-        this.pool = [].concat(unchanged, recycled);
         this.#updateData(recycled, data);
         this.start++;
       }
       this.#updateElement("down");
       syncContainerHeight(container);
+      this.#updateStatus(`Loaded ${data.length} items.`);
+      this.#scheduleStatusClear();
+    } catch (error) {
+      this.#updateStatus("");
+      throw error;
     } finally {
       this.#isLoading = false;
     }
@@ -231,10 +277,12 @@ export class VirtualList {
       return;
     }
     this.#isLoading = true;
+    this.#updateStatus("Loading previous items...");
     try {
       const container = getContainer();
       const data = await this.props.getPage(this.start - 1);
       if (!Array.isArray(data) || data.length === 0) {
+        this.#updateStatus("");
         return;
       }
       this.start--;
@@ -249,7 +297,6 @@ export class VirtualList {
       ];
       this.#blurActiveInRecycled(recycled);
       this.pool = [...recycled, ...unchanged];
-      this.pool = [].concat(recycled, unchanged);
       this.#updateData(recycled, data);
       const { anchorDelta, topY } = this.#updateElement("up", recycleCount);
       this.end--;
@@ -278,6 +325,12 @@ export class VirtualList {
       } else {
         syncContainerHeight(container);
       }
+
+      this.#updateStatus(`Loaded ${data.length} previous items.`);
+      this.#scheduleStatusClear();
+    } catch (error) {
+      this.#updateStatus("");
+      throw error;
     } finally {
       this.#isLoading = false;
     }

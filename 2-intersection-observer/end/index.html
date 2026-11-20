@@ -17,8 +17,14 @@
   </head>
   <body>
     <main id="container">
+      <div
+        id="feed-status"
+        class="sr-only"
+        role="status"
+        aria-live="polite"
+      ></div>
       <div id="list"></div>
-      <div id="bottom-observer">Bottom Observer</div>
+      <div id="bottom-observer" aria-hidden="true">Bottom Observer</div>
     </main>
     <script type="module">
       import { initMockDB } from "../../utils/db.js";
@@ -26,6 +32,7 @@
       const [template, list, observerElement] = document.querySelectorAll(
         "#card_template, #list, #bottom-observer",
       );
+      const statusElement = document.getElementById("feed-status");
 
       const db = initMockDB({
         title: "Fundamentals of Frontend System Design",
@@ -51,16 +58,47 @@
        */
       let page = 0;
       let isLoading = false;
+      let clearStatusTimer = null;
+
+      function updateStatus(message) {
+        if (!statusElement) {
+          return;
+        }
+        if (clearStatusTimer !== null) {
+          clearTimeout(clearStatusTimer);
+          clearStatusTimer = null;
+        }
+        statusElement.textContent = message;
+      }
+
+      function scheduleStatusClear(delayMs = 1500) {
+        if (!statusElement) {
+          return;
+        }
+        if (clearStatusTimer !== null) {
+          clearTimeout(clearStatusTimer);
+        }
+        clearStatusTimer = setTimeout(() => {
+          clearStatusTimer = null;
+          if (!isLoading) {
+            statusElement.textContent = "";
+          }
+        }, delayMs);
+      }
+
       const observer = new IntersectionObserver(
         async ([entry]) => {
           if (entry.isIntersecting && !isLoading) {
             isLoading = true;
             observerElement.textContent = "Loading";
+            updateStatus("Loading more items...");
             try {
               const data = await db.getPage(page++);
-              if (data.length === 0) {
+              if (!data?.length) {
                 observerElement.textContent = "End of feed";
                 observer.unobserve(observerElement);
+                updateStatus("No more items to load.");
+                scheduleStatusClear();
                 return;
               }
               const fragment = new DocumentFragment();
@@ -70,6 +108,12 @@
               });
               list.appendChild(fragment);
               observerElement.textContent = "Bottom Observer";
+              updateStatus(`Loaded ${data.length} items.`);
+              scheduleStatusClear();
+            } catch (error) {
+              observerElement.textContent = "Bottom Observer";
+              updateStatus("");
+              throw error;
             } finally {
               isLoading = false;
             }
