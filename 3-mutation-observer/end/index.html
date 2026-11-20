@@ -41,8 +41,11 @@
 
     const mutationObserver = new MutationObserver((mutations) => {
         for (const {target, type} of mutations) {
+            const contentContainer = target?.parentElement?.closest('.card__body__content');
             if (
                 type === 'characterData' &&
+                contentContainer?.isContentEditable &&
+                target.parentElement?.isContentEditable &&
                 SUPPORTED_ELEMENTS.has(target?.textContent)
             ) {
                 const element = getHeading(target);
@@ -50,7 +53,8 @@
                 element.focus();
             }
         }
-    })
+    });
+    mutationObserver.observe(list, { characterData: true, subtree: true });
 
     let page = 0;
     const observer = new IntersectionObserver(async ([bottom]) => {
@@ -61,8 +65,6 @@
             data.forEach(({title, body}) => {
                 const card = createCardElement(title, body);
                 fragment.appendChild(card);
-                const content = card.querySelector('.card__body__content');
-                mutationObserver.observe(content, { characterData: true, subtree: true})
             });
 
             list.appendChild(fragment);
