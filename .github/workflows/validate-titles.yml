@@ -1,0 +1,30 @@
+name: Validate Exercise Titles
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: validate-titles-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate-titles:
+    name: Validate Static HTML Titles (WCAG 2.4.2)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Run exercise title validation suite
+        run: node --test tests/exercise-titles.test.mjs
