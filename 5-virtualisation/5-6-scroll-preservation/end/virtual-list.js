@@ -49,6 +49,9 @@ export class VirtualList {
         this.root = root;
         this.pool = [];
         this.poolLimit = this.props.pageSize * 2;
+        this.hasMore = true;
+        this.isLoading = false;
+        this.observer = null;
         this.#isLoading = false;
     }
 
@@ -95,7 +98,7 @@ export class VirtualList {
                     const id = entry.target.id;
                     if (id === 'top-observer' && this.start > 0) {
                         void this.#handleTopObserver().catch(() => {});
-                    } else if (id === 'bottom-observer') {
+                    } else if (id === 'bottom-observer' && this.hasMore) {
                         void this.#handleBottomObserver().catch(() => {});
                     }
                 }
@@ -108,11 +111,12 @@ export class VirtualList {
      * @returns void
      */
     #effect() {
-        intersectionObserver(
+        this.observer?.disconnect();
+        this.observer = intersectionObserver(
             getObservers(),
             this.#handleIntersection(),
             {}
-        )
+        );
     }
 
     /**
@@ -120,15 +124,21 @@ export class VirtualList {
      * @returns Promise<void>
      */
     async #handleBottomObserver() {
-        if (this.#isLoading) {
+        if (this.isLoading || this.#isLoading || !this.hasMore) {
             return;
         }
+        this.isLoading = true;
         this.#isLoading = true;
         try {
             const container = getContainer();
             const list = getList();
             const data = await this.props.getPage(this.end);
-            if (!data?.length) {
+            if (!Array.isArray(data) || data.length === 0) {
+                this.hasMore = false;
+                const [, bottomObserver] = getObservers();
+                if (bottomObserver) {
+                    this.observer?.unobserve?.(bottomObserver);
+                }
                 return;
             }
             this.end++;
@@ -153,6 +163,7 @@ export class VirtualList {
             this.#updateElement("down");
             container.style.height = `${container.scrollHeight}px`;
         } finally {
+            this.isLoading = false;
             this.#isLoading = false;
         }
     }
