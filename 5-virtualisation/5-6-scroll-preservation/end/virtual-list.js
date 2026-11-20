@@ -18,6 +18,30 @@ function getContainer() {
   return document.getElementById("container");
 }
 
+function syncContainerHeight(container) {
+  if (!container || !("scrollHeight" in container)) {
+    return 0;
+  }
+  container.style.minHeight = "";
+  container.style.height = "";
+  const scrollHeight = container.scrollHeight;
+  const nextHeight = `${scrollHeight}px`;
+  container.style.height = nextHeight;
+  container.style.minHeight = nextHeight;
+  return scrollHeight;
+}
+
+function adjustWindowScroll(scrollDelta) {
+  if (!scrollDelta || typeof window === "undefined") {
+    return;
+  }
+  if (typeof window.scrollBy === "function") {
+    window.scrollBy(0, scrollDelta);
+  } else if (typeof window.scrollTo === "function") {
+    window.scrollTo(window.scrollX ?? 0, (window.scrollY ?? 0) + scrollDelta);
+  }
+}
+
 /**
  * Computes vertical separation between adjacent cards from computed CSS margins,
  * scaling automatically with root font-size (rem) and custom spacing overrides.
@@ -67,6 +91,7 @@ function y(element, value = undefined) {
 export class VirtualList {
   #hasMore = true;
   #isLoading = false;
+  #onScroll = null;
   #resizeObserver = null;
   #cardSizes = new WeakMap();
   #rafId = null;
@@ -288,6 +313,9 @@ export class VirtualList {
     if (container && requiredHeight > this.#minContainerHeight) {
       this.#minContainerHeight = requiredHeight;
       container.style.minHeight = `${this.#minContainerHeight}px`;
+      if (container.style.height) {
+        container.style.height = `${this.#minContainerHeight}px`;
+      }
     }
   }
 
@@ -304,6 +332,23 @@ export class VirtualList {
     );
     this.#resizeObserver?.disconnect?.();
     this.#resizeObserver = resizeObserver(this.pool, this.#handleResize());
+    if (
+      typeof window !== "undefined" &&
+      typeof window.addEventListener === "function"
+    ) {
+      if (this.#onScroll && typeof window.removeEventListener === "function") {
+        window.removeEventListener("scroll", this.#onScroll);
+      }
+      this.#onScroll = () => {
+        if (this.start > 0 && !this.#isLoading && this.pool.length > 0) {
+          const topY = +(y(this.pool[0]) ?? 0);
+          if ((window.scrollY ?? 0) < topY) {
+            void this.#handleTopObserver().catch(() => {});
+          }
+        }
+      };
+      window.addEventListener("scroll", this.#onScroll, { passive: true });
+    }
   }
 
   /**
@@ -316,6 +361,7 @@ export class VirtualList {
     }
     this.#isLoading = true;
     try {
+      const container = getContainer();
       const list = getList();
       const data = await this.props.getPage(this.end);
       if (!Array.isArray(data) || data.length === 0) {
@@ -355,6 +401,10 @@ export class VirtualList {
         this.start++;
       }
       this.#updateElement("down");
+      const syncedHeight = syncContainerHeight(container);
+      if (syncedHeight > 0) {
+        this.#minContainerHeight = syncedHeight;
+      }
     } finally {
       this.#isLoading = false;
     }
@@ -370,19 +420,25 @@ export class VirtualList {
     }
     this.#isLoading = true;
     try {
+      const container = getContainer();
       const data = await this.props.getPage(this.start - 1);
       if (!Array.isArray(data) || data.length === 0) {
         return;
       }
       this.start--;
+      const recycleCount = Math.min(
+        data.length,
+        this.props.pageSize,
+        this.pool.length,
+      );
       const [recycled, unchanged] = [
-        this.pool.slice(this.props.pageSize, this.pool.length),
-        this.pool.slice(0, this.props.pageSize),
+        this.pool.slice(this.pool.length - recycleCount, this.pool.length),
+        this.pool.slice(0, this.pool.length - recycleCount),
       ];
       this.#blurActiveInRecycled(recycled);
       this.pool = [].concat(recycled, unchanged);
       this.#updateData(recycled, data);
-      this.#updateElement("up");
+      const { anchorDelta, topY } = this.#updateElement("up", recycleCount);
       this.end--;
       const wasExhausted = !this.#hasMore;
       this.#hasMore = true;
@@ -391,6 +447,27 @@ export class VirtualList {
         if (bottomObserver) {
           this.observer?.observe?.(bottomObserver);
         }
+      }
+
+      let syncedHeight = 0;
+      if (typeof window !== "undefined") {
+        const currentScrollY = window.scrollY ?? 0;
+        const targetScrollY = Math.max(topY, currentScrollY + anchorDelta);
+        const scrollDelta = targetScrollY - currentScrollY;
+        if (scrollDelta > 0) {
+          syncedHeight = syncContainerHeight(container);
+          adjustWindowScroll(scrollDelta);
+        } else {
+          if (scrollDelta < 0) {
+            adjustWindowScroll(scrollDelta);
+          }
+          syncedHeight = syncContainerHeight(container);
+        }
+      } else {
+        syncedHeight = syncContainerHeight(container);
+      }
+      if (syncedHeight > 0) {
+        this.#minContainerHeight = syncedHeight;
       }
     } finally {
       this.#isLoading = false;
@@ -432,11 +509,12 @@ export class VirtualList {
    * 2. Updates absolute position of elements and observers
    *
    * @param direction {"up" | "down"}
-   * @return {void}
+   * @param count {number}
+   * @return {{ prependedHeight: number, anchorDelta: number, topY: number }}
    */
-  #updateElement(direction) {
+  #updateElement(direction, count = this.props.pageSize) {
     if (this.pool.length === 0) {
-      return;
+      return { prependedHeight: 0, anchorDelta: 0, topY: 0 };
     }
     const container = getContainer();
     const [topObserver, bottomObserver] = getObservers();
@@ -458,7 +536,7 @@ export class VirtualList {
         ? isPoolFull
           ? recycledStart
           : 0
-        : Math.min(this.props.pageSize - 1, lastIndex);
+        : Math.min(count - 1, lastIndex);
     const end = direction === "down" ? this.pool.length : 0;
 
     // Phase 1: Batch DOM geometry reads before any style or attribute mutations
@@ -474,8 +552,7 @@ export class VirtualList {
         });
       }
     } else {
-      const measureEnd = Math.min(lastIndex, start + 1);
-      for (let i = 0; i <= measureEnd; i++) {
+      for (let i = end; i <= start; i++) {
         const rect = this.pool[i].getBoundingClientRect();
         heights[i] = rect.height;
         this.#cardSizes.set(this.pool[i], {
@@ -502,7 +579,10 @@ export class VirtualList {
         : 0;
 
     // Phase 2: Compute target vertical positions in memory
-    let shiftedAll = false;
+    let prependedHeight = 0;
+    let anchorDelta = 0;
+    let writeEnd = start;
+
     if (direction === "down") {
       for (let i = start; i < end; i++) {
         if (i === 0 || yValues[i - 1] == null) {
@@ -513,23 +593,39 @@ export class VirtualList {
         }
       }
     } else {
-      for (let i = start; i >= end; i--) {
-        if (i + 1 >= this.pool.length || yValues[i + 1] == null) {
-          yValues[i] = 0;
-        } else {
-          yValues[i] = yValues[i + 1] - (heights[i] + verticalMargin);
-          shouldTransform[i] = true;
-        }
+      for (let i = end; i <= start; i++) {
+        prependedHeight += heights[i] + verticalMargin;
       }
-      if (yValues[0] < 0) {
-        const underflowShift = -yValues[0];
-        for (let i = 0; i <= lastIndex; i++) {
-          if (yValues[i] != null) {
-            yValues[i] += underflowShift;
-            shouldTransform[i] = true;
+      const anchorIndex = start + 1;
+      const hasAnchor =
+        anchorIndex < this.pool.length && yValues[anchorIndex] != null;
+      const previousAnchorY = hasAnchor ? yValues[anchorIndex] : 0;
+      const firstY =
+        !hasAnchor || this.start === 0
+          ? 0
+          : Math.max(0, previousAnchorY - prependedHeight);
+
+      yValues[end] = firstY;
+      if (hasAnchor || firstY !== 0) {
+        shouldTransform[end] = true;
+      }
+      for (let i = end + 1; i <= start; i++) {
+        yValues[i] = yValues[i - 1] + (heights[i - 1] + verticalMargin);
+        shouldTransform[i] = true;
+      }
+
+      if (hasAnchor) {
+        const newAnchorY = firstY + prependedHeight;
+        anchorDelta = newAnchorY - previousAnchorY;
+        if (anchorDelta !== 0) {
+          writeEnd = lastIndex;
+          for (let i = anchorIndex; i <= lastIndex; i++) {
+            if (yValues[i] != null) {
+              yValues[i] = Math.max(0, yValues[i] + anchorDelta);
+              shouldTransform[i] = true;
+            }
           }
         }
-        shiftedAll = true;
       }
     }
 
@@ -549,8 +645,7 @@ export class VirtualList {
         }
       }
     } else {
-      const writeStart = shiftedAll ? lastIndex : start;
-      for (let i = writeStart; i >= end; i--) {
+      for (let i = writeEnd; i >= end; i--) {
         const current = this.pool[i];
         const yPos = yValues[i];
         y(current, yPos);
@@ -570,6 +665,12 @@ export class VirtualList {
       this.#minContainerHeight = requiredHeight;
       container.style.minHeight = `${this.#minContainerHeight}px`;
     }
+
+    return {
+      prependedHeight,
+      anchorDelta,
+      topY: yValues[0],
+    };
   }
 
   /**
