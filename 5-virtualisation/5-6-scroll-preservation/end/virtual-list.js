@@ -1,15 +1,10 @@
 import { intersectionObserver } from "../../../utils/observer.js";
-
-const MARGIN = 16;
+import { MARGIN, getList, y } from "../../../utils/virtual-list-helpers.js";
 
 const getObservers = () => [
   document.getElementById("top-observer"),
   document.getElementById("bottom-observer"),
 ];
-
-function getList() {
-  return document.getElementById("virtual-list");
-}
 
 function getContainer() {
   return document.getElementById("container");
@@ -32,21 +27,6 @@ function adjustWindowScroll(scrollDelta) {
   } else if (typeof window.scrollTo === "function") {
     window.scrollTo(window.scrollX ?? 0, (window.scrollY ?? 0) + scrollDelta);
   }
-}
-
-/**
- * Returns `data-y` attribute of the HTMLElement, if value is provided
- * additionally updates the attribute
- *
- * @param element {HTMLElement}
- * @param value {string | number}
- * @returns {?string}
- */
-function y(element, value = undefined) {
-  if (value != null) {
-    element.setAttribute("data-y", value);
-  }
-  return element.getAttribute("data-y");
 }
 
 export class VirtualList {
