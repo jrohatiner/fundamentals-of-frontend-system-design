@@ -1,6 +1,8 @@
 import { intersectionObserver } from "../../../utils/observer.js";
 import { MARGIN, getList, y } from "../../../utils/virtual-list-helpers.js";
 
+const OBSERVER_THRESHOLD = 0.25;
+
 const getObservers = () => [
   document.getElementById("top-observer"),
   document.getElementById("bottom-observer"),
@@ -29,23 +31,50 @@ function adjustWindowScroll(scrollDelta) {
   }
 }
 
-/**
- * Returns `data-y` attribute of the HTMLElement, if value is provided
- * additionally updates the attribute
- *
- * @param element {HTMLElement}
- * @param value {string | number}
- * @returns {?string}
- */
-function y(element, value = undefined) {
-  if (value != null) {
-    element.setAttribute("data-y", value);
+function getViewportHeight() {
+  if (
+    typeof window !== "undefined" &&
+    typeof window.innerHeight === "number" &&
+    window.innerHeight > 0
+  ) {
+    return window.innerHeight;
   }
+  const docEl =
+    typeof document !== "undefined" ? document.documentElement : null;
+  if (
+    docEl &&
+    typeof docEl.clientHeight === "number" &&
+    docEl.clientHeight > 0
+  ) {
+    return docEl.clientHeight;
+  }
+  return null;
+}
+
+function hasLayoutBox(rect) {
+  return rect != null && (rect.width > 0 || rect.height > 0);
+}
+
+function isIntersectingViewport(
+  rect,
+  viewportHeight,
+  threshold = OBSERVER_THRESHOLD,
+) {
+  if (!hasLayoutBox(rect)) {
+    return false;
+  }
+  if (rect.height <= 0) {
+    return rect.bottom >= 0 && rect.top <= viewportHeight;
+  }
+  const visibleTop = Math.max(0, rect.top);
+  const visibleBottom = Math.min(viewportHeight, rect.bottom);
+  const visibleHeight = Math.max(0, visibleBottom - visibleTop);
+  return visibleHeight / rect.height >= threshold;
 }
 
 export class VirtualList {
   #hasMore = true;
-  #isLoading = false;
+  #isFetching = false;
   #onScroll = null;
 
   get hasMore() {
@@ -57,11 +86,11 @@ export class VirtualList {
   }
 
   get isLoading() {
-    return this.#isLoading;
+    return this.#isFetching;
   }
 
   set isLoading(value) {
-    this.#isLoading = Boolean(value);
+    this.#isFetching = Boolean(value);
   }
 
   /**
@@ -81,7 +110,7 @@ export class VirtualList {
     this.pool = [];
     this.poolLimit = this.props.pageSize * 2;
     this.#hasMore = true;
-    this.#isLoading = false;
+    this.#isFetching = false;
     this.observer = null;
   }
 
@@ -117,19 +146,21 @@ export class VirtualList {
    */
   #handleIntersection() {
     return (entries) => {
-      if (this.#isLoading) {
+      if (this.#isFetching) {
         return;
       }
       for (const entry of entries) {
-        if (this.#isLoading) {
+        if (this.#isFetching) {
           return;
         }
         if (entry.isIntersecting) {
           const id = entry.target.id;
           if (id === "top-observer" && this.start > 0) {
-            void this.#handleTopObserver().catch(() => {});
+            void this.#handleTopObserver();
+            return;
           } else if (id === "bottom-observer" && this.#hasMore) {
-            void this.#handleBottomObserver().catch(() => {});
+            void this.#handleBottomObserver();
+            return;
           }
         }
       }
@@ -155,10 +186,10 @@ export class VirtualList {
         window.removeEventListener("scroll", this.#onScroll);
       }
       this.#onScroll = () => {
-        if (this.start > 0 && !this.#isLoading && this.pool.length > 0) {
+        if (this.start > 0 && !this.#isFetching && this.pool.length > 0) {
           const topY = +(y(this.pool[0]) ?? 0);
           if ((window.scrollY ?? 0) < topY) {
-            void this.#handleTopObserver().catch(() => {});
+            void this.#handleTopObserver();
           }
         }
       };
@@ -171,54 +202,65 @@ export class VirtualList {
    * @returns Promise<void>
    */
   async #handleBottomObserver() {
-    if (!this.#hasMore || this.#isLoading) {
+    if (this.#isFetching || !this.#hasMore) {
       return;
     }
-    this.#isLoading = true;
+    this.#isFetching = true;
+    let didUpdate = false;
+    let failed = false;
     try {
       const container = getContainer();
       const list = getList();
-      const data = await this.props.getPage(this.end);
+      const page = this.end;
+      const data = await this.props.getPage(page);
       if (!Array.isArray(data) || data.length === 0) {
         this.#hasMore = false;
         const [, bottomObserver] = getObservers();
         if (bottomObserver) {
           this.observer?.unobserve?.(bottomObserver);
         }
-        return;
-      }
-      if (data.length < this.props.pageSize) {
-        this.#hasMore = false;
-        const [, bottomObserver] = getObservers();
-        if (bottomObserver) {
-          this.observer?.unobserve?.(bottomObserver);
-        }
-        if (this.pool.length >= this.poolLimit) {
-          return;
-        }
-      }
-      this.end++;
-      if (this.pool.length < this.poolLimit) {
-        const fragment = new DocumentFragment();
-        const elements = data.map((datum) => this.props.getTemplate(datum));
-        elements.forEach((el) => fragment.appendChild(el));
-        this.pool.push(...elements);
-        list.appendChild(fragment);
       } else {
-        const [unchanged, recycled] = [
-          this.pool.slice(this.props.pageSize, this.pool.length),
-          this.pool.slice(0, this.props.pageSize),
-        ];
-        this.#blurActiveInRecycled(recycled);
-        this.pool = [...unchanged, ...recycled];
-        this.pool = [].concat(unchanged, recycled);
-        this.#updateData(recycled, data);
-        this.start++;
+        let shouldRender = true;
+        if (data.length < this.props.pageSize) {
+          this.#hasMore = false;
+          const [, bottomObserver] = getObservers();
+          if (bottomObserver) {
+            this.observer?.unobserve?.(bottomObserver);
+          }
+          if (this.pool.length >= this.poolLimit) {
+            shouldRender = false;
+          }
+        }
+        if (shouldRender) {
+          this.end = page + 1;
+          if (this.pool.length < this.poolLimit) {
+            const fragment = new DocumentFragment();
+            const elements = data.map((datum) => this.props.getTemplate(datum));
+            elements.forEach((el) => fragment.appendChild(el));
+            this.pool.push(...elements);
+            list.appendChild(fragment);
+          } else {
+            const [unchanged, recycled] = [
+              this.pool.slice(this.props.pageSize, this.pool.length),
+              this.pool.slice(0, this.props.pageSize),
+            ];
+            this.#blurActiveInRecycled(recycled);
+            this.pool = [...unchanged, ...recycled];
+            this.#updateData(recycled, data);
+            this.start++;
+          }
+          this.#updateElement("down");
+          syncContainerHeight(container);
+          didUpdate = true;
+        }
       }
-      this.#updateElement("down");
-      syncContainerHeight(container);
+    } catch {
+      failed = true;
     } finally {
-      this.#isLoading = false;
+      this.#isFetching = false;
+    }
+    if (!failed) {
+      this.#checkSentinelVisibility(didUpdate ? null : "bottom-observer");
     }
   }
 
@@ -227,59 +269,118 @@ export class VirtualList {
    * @returns Promise<void>
    */
   async #handleTopObserver() {
-    if (this.start <= 0 || this.#isLoading) {
+    if (this.#isFetching || this.start <= 0) {
       return;
     }
-    this.#isLoading = true;
+    this.#isFetching = true;
+    let didUpdate = false;
+    let failed = false;
     try {
       const container = getContainer();
-      const data = await this.props.getPage(this.start - 1);
-      if (!Array.isArray(data) || data.length === 0) {
-        return;
-      }
-      this.start--;
-      const recycleCount = Math.min(
-        data.length,
-        this.props.pageSize,
-        this.pool.length,
-      );
-      const [recycled, unchanged] = [
-        this.pool.slice(this.pool.length - recycleCount, this.pool.length),
-        this.pool.slice(0, this.pool.length - recycleCount),
-      ];
-      this.#blurActiveInRecycled(recycled);
-      this.pool = [...recycled, ...unchanged];
-      this.pool = [].concat(recycled, unchanged);
-      this.#updateData(recycled, data);
-      const { anchorDelta, topY } = this.#updateElement("up", recycleCount);
-      this.end--;
-      const wasExhausted = !this.#hasMore;
-      this.#hasMore = true;
-      if (wasExhausted) {
-        const [, bottomObserver] = getObservers();
-        if (bottomObserver) {
-          this.observer?.observe?.(bottomObserver);
-        }
-      }
-
-      if (typeof window !== "undefined") {
-        const currentScrollY = window.scrollY ?? 0;
-        const targetScrollY = Math.max(topY, currentScrollY + anchorDelta);
-        const scrollDelta = targetScrollY - currentScrollY;
-        if (scrollDelta > 0) {
-          syncContainerHeight(container);
-          adjustWindowScroll(scrollDelta);
-        } else {
-          if (scrollDelta < 0) {
-            adjustWindowScroll(scrollDelta);
+      const page = this.start - 1;
+      const data = await this.props.getPage(page);
+      if (Array.isArray(data) && data.length > 0) {
+        this.start = page;
+        const recycleCount = Math.min(
+          data.length,
+          this.props.pageSize,
+          this.pool.length,
+        );
+        const [recycled, unchanged] = [
+          this.pool.slice(this.pool.length - recycleCount, this.pool.length),
+          this.pool.slice(0, this.pool.length - recycleCount),
+        ];
+        this.#blurActiveInRecycled(recycled);
+        this.pool = [...recycled, ...unchanged];
+        this.#updateData(recycled, data);
+        const { anchorDelta, topY } = this.#updateElement("up", recycleCount);
+        this.end--;
+        if (!this.#hasMore) {
+          this.#hasMore = true;
+          const [, bottomObserver] = getObservers();
+          if (bottomObserver) {
+            this.observer?.observe?.(bottomObserver);
           }
+        }
+
+        if (typeof window !== "undefined") {
+          const currentScrollY = window.scrollY ?? 0;
+          const targetScrollY = Math.max(topY, currentScrollY + anchorDelta);
+          const scrollDelta = targetScrollY - currentScrollY;
+          if (scrollDelta > 0) {
+            syncContainerHeight(container);
+            adjustWindowScroll(scrollDelta);
+          } else {
+            if (scrollDelta < 0) {
+              adjustWindowScroll(scrollDelta);
+            }
+            syncContainerHeight(container);
+          }
+        } else {
           syncContainerHeight(container);
         }
-      } else {
-        syncContainerHeight(container);
+        didUpdate = true;
       }
+    } catch {
+      failed = true;
     } finally {
-      this.#isLoading = false;
+      this.#isFetching = false;
+    }
+    if (!failed) {
+      this.#checkSentinelVisibility(didUpdate ? null : "top-observer");
+    }
+  }
+
+  /**
+   * Checks sentinel visibility after lock release in case the user remained
+   * at or scrolled past the list boundary during an in-flight fetch.
+   *
+   * @param skipObserverId {?string}
+   * @returns {void}
+   */
+  #checkSentinelVisibility(skipObserverId = null) {
+    if (this.#isFetching || this.pool.length === 0) {
+      return;
+    }
+    const viewportHeight = getViewportHeight();
+    if (viewportHeight == null) {
+      return;
+    }
+    const [topObserver, bottomObserver] = getObservers();
+    const topRect = topObserver ? topObserver.getBoundingClientRect() : null;
+    const bottomRect = bottomObserver
+      ? bottomObserver.getBoundingClientRect()
+      : null;
+
+    if (
+      !hasLayoutBox(topRect) ||
+      !hasLayoutBox(bottomRect) ||
+      bottomRect.top <= topRect.top
+    ) {
+      return;
+    }
+
+    const topVisible = isIntersectingViewport(topRect, viewportHeight);
+    const bottomVisible = isIntersectingViewport(bottomRect, viewportHeight);
+
+    if (this.pool.length >= this.poolLimit && topVisible && bottomVisible) {
+      return;
+    }
+
+    const canCheckTop = skipObserverId !== "top-observer" && this.start > 0;
+    const canCheckBottom =
+      skipObserverId !== "bottom-observer" && this.#hasMore;
+
+    const atTopBoundary =
+      canCheckTop && topRect.bottom >= topRect.height * OBSERVER_THRESHOLD;
+    const atBottomBoundary =
+      canCheckBottom &&
+      bottomRect.top <= viewportHeight - bottomRect.height * OBSERVER_THRESHOLD;
+
+    if (atTopBoundary && !atBottomBoundary) {
+      void this.#handleTopObserver();
+    } else if (atBottomBoundary && !atTopBoundary) {
+      void this.#handleBottomObserver();
     }
   }
 

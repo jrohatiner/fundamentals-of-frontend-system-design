@@ -6,12 +6,6 @@ const getObservers = () => [
   document.getElementById("bottom-observer"),
 ];
 
-function getList() {
-  return document.getElementById("virtual-list");
-function getContainer() {
-  return document.getElementById("container");
-}
-
 /**
  * Part 4.1 - Bottom Transitioning of updated elements
  *
