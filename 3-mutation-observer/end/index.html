@@ -78,7 +78,7 @@
       mutationObserver.observe(list, { characterData: true, subtree: true });
 
       let page = 0;
-      let pendingLoads = 0;
+      let isLoading = false;
       let clearStatusTimer = null;
 
       function updateStatus(message) {
@@ -101,7 +101,7 @@
         }
         clearStatusTimer = setTimeout(() => {
           clearStatusTimer = null;
-          if (pendingLoads === 0) {
+          if (!isLoading) {
             statusElement.textContent = "";
           }
         }, delayMs);
@@ -109,18 +109,17 @@
 
       const observer = new IntersectionObserver(
         async ([bottom]) => {
-          if (bottom.isIntersecting) {
-            pendingLoads++;
+          if (bottom.isIntersecting && !isLoading) {
+            isLoading = true;
             observerElement.textContent = "Loading";
             updateStatus("Loading more items...");
             try {
               const data = await db.getPage(page++);
               if (!data?.length) {
-                pendingLoads--;
-                if (pendingLoads === 0) {
-                  observerElement.textContent = "Bottom Observer";
-                  updateStatus("");
-                }
+                observerElement.textContent = "End of feed";
+                observer.unobserve(observerElement);
+                updateStatus("No more items to load.");
+                scheduleStatusClear();
                 return;
               }
               const fragment = new DocumentFragment();
@@ -130,25 +129,15 @@
               });
 
               list.appendChild(fragment);
-              pendingLoads--;
-              if (pendingLoads === 0) {
-                observerElement.textContent = "Bottom Observer";
-              }
-              updateStatus(
-                pendingLoads > 0
-                  ? `Loaded ${data.length} items. Loading more items...`
-                  : `Loaded ${data.length} items.`,
-              );
-              if (pendingLoads === 0) {
-                scheduleStatusClear();
-              }
+              observerElement.textContent = "Bottom Observer";
+              updateStatus(`Loaded ${data.length} items.`);
+              scheduleStatusClear();
             } catch (error) {
-              pendingLoads = Math.max(0, pendingLoads - 1);
-              if (pendingLoads === 0) {
-                observerElement.textContent = "Bottom Observer";
-                updateStatus("");
-              }
+              observerElement.textContent = "Bottom Observer";
+              updateStatus("");
               throw error;
+            } finally {
+              isLoading = false;
             }
           }
         },

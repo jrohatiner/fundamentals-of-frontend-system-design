@@ -90,12 +90,13 @@
         async ([entry]) => {
           if (entry.isIntersecting && !isLoading) {
             isLoading = true;
+            observerElement.textContent = "Loading";
             updateStatus("Loading more items...");
             try {
               const data = await db.getPage(page++);
               if (!data?.length) {
+                observerElement.textContent = "End of feed";
                 observer.unobserve(observerElement);
-                observerElement.textContent = "No more items to load";
                 updateStatus("No more items to load.");
                 scheduleStatusClear();
                 return;
@@ -106,9 +107,11 @@
                 fragment.appendChild(card);
               });
               list.appendChild(fragment);
+              observerElement.textContent = "Bottom Observer";
               updateStatus(`Loaded ${data.length} items.`);
               scheduleStatusClear();
             } catch (error) {
+              observerElement.textContent = "Bottom Observer";
               updateStatus("");
               throw error;
             } finally {

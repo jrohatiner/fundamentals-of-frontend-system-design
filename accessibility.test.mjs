@@ -231,7 +231,8 @@ async function assertSentinelsHiddenAndStatusLiveInAXTree(chrome, sentinelIds) {
       !node.ignored &&
       (node.name?.value === "Bottom Observer" ||
         node.name?.value === "Top Observer" ||
-        node.name?.value === "Loading"),
+        node.name?.value === "Loading" ||
+        node.name?.value === "End of feed"),
   );
   assert.equal(
     unignoredSentinelStrings.length,
@@ -390,7 +391,7 @@ test("hides sentinels from assistive technology trees and announces feed paginat
     `);
   await waitForCondition(
     chrome.evaluate,
-    `document.getElementById('bottom-observer')?.textContent.trim() === 'No more items to load'`,
+    `document.getElementById('bottom-observer')?.textContent.trim() === 'End of feed'`,
   );
   assert.equal(
     await chrome.evaluate(
