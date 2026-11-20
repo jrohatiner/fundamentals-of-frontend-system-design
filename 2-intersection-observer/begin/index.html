@@ -23,21 +23,15 @@
     </div>
 </main>
 <script type="module">
+    import {createCardElement} from "../../utils/card.js";
     import {initMockDB} from "../../utils/db.js";
 
-    const [template, list, observerElement] = document.querySelectorAll("#card_template, #list, #bottom-observer");
+    const [list, observerElement] = document.querySelectorAll("#list, #bottom-observer");
 
     const db = initMockDB({
         title: "Fundamentals of Frontend System Design",
         body: "Learning to use Intersection Observer"
     });
-
-    function createCardElement(title, body) {
-        const element = template.content.cloneNode(true).firstElementChild;
-        const [cardTitle, cardBody] = element.querySelectorAll('.card__title, .card__body__content');
-        [cardTitle.textContent, cardBody.textContent] = [title, body];
-        return element;
-    }
 
     /**
      * Exercise - Intersection Observer
