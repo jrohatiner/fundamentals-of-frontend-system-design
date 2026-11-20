@@ -15,13 +15,12 @@ export function initMockDB(sample, count = 100, page = 10) {
         i * page,
         i * page + page
     ));
-    let index = -1;
     function getPage(pointer) {
         return new Promise((res) => {
             setTimeout(() => {
                 pointer < 0 || pointer > data.length - 1
                     ? res([])
-                    : res(data[index=pointer]);
+                    : res(data[pointer]);
             }, 1000);
         });
     }
