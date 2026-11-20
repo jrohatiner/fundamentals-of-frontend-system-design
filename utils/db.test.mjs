@@ -2,6 +2,14 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { initMockDB } from "./db.js";
 
+function enableMockTimeout(t) {
+  try {
+    t.mock.timers.enable({ apis: ["setTimeout"] });
+  } catch {
+    t.mock.timers.enable(["setTimeout"]);
+  }
+}
+
 describe("initMockDB", () => {
   it("exports only getPage on the returned instance", () => {
     const db = initMockDB({ title: "Title", body: "Body" });
@@ -11,7 +19,7 @@ describe("initMockDB", () => {
   });
 
   it("paginates entries using default count (100) and page size (10) after 1000ms", async (t) => {
-    t.mock.timers.enable({ apis: ["setTimeout"] });
+    enableMockTimeout(t);
 
     const db = initMockDB({ title: "Hello", body: "World" });
 
@@ -49,7 +57,7 @@ describe("initMockDB", () => {
   });
 
   it("supports custom count and page sizes including partial trailing pages", async (t) => {
-    t.mock.timers.enable({ apis: ["setTimeout"] });
+    enableMockTimeout(t);
 
     const db = initMockDB({ label: "Item" }, 7, 3);
 
@@ -72,7 +80,7 @@ describe("initMockDB", () => {
   });
 
   it("resolves out-of-bounds pointers to empty arrays without affecting subsequent lookups", async (t) => {
-    t.mock.timers.enable({ apis: ["setTimeout"] });
+    enableMockTimeout(t);
 
     const db = initMockDB({ title: "Test" }, 10, 5);
 
@@ -89,7 +97,7 @@ describe("initMockDB", () => {
   });
 
   it("resolves concurrent and non-sequential page requests independently", async (t) => {
-    t.mock.timers.enable({ apis: ["setTimeout"] });
+    enableMockTimeout(t);
 
     const db = initMockDB({ title: "Concurrent" }, 30, 10);
 
