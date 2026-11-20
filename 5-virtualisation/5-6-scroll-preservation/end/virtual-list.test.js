@@ -1,5 +1,11 @@
 import assert from 'node:assert/strict';
+import { spawn } from 'node:child_process';
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import http from 'node:http';
+import os from 'node:os';
+import path from 'node:path';
 import { afterEach, beforeEach, describe, it } from 'node:test';
+import { fileURLToPath } from 'node:url';
 import { VirtualList } from './virtual-list.js';
 import { initMockDB } from '../../../utils/db.js';
 
@@ -808,5 +814,511 @@ describe('VirtualList in-flight pagination lock', () => {
             list.pool.map((el) => el.textContent),
             Array.from({ length: 10 }, (_, i) => `[Entry ${i}] - Card`)
         );
+    });
+});
+
+describe('VirtualList active element blur guard and static card template', () => {
+    const __dirname = path.dirname(fileURLToPath(import.meta.url));
+    const REPO_ROOT = path.resolve(__dirname, '../../..');
+
+    class FocusMockDocumentFragment {
+        constructor() {
+            this.children = [];
+        }
+
+        appendChild(child) {
+            this.children.push(child);
+            return child;
+        }
+    }
+
+    class FocusMockElement {
+        constructor(tagName, ownerDoc, events, id = '') {
+            this.tagName = tagName.toUpperCase();
+            this.ownerDoc = ownerDoc;
+            this.events = events;
+            this.id = id;
+            this.children = [];
+            this.attributes = new Map();
+            this._height = 120;
+            this.textContent = '';
+            this._transform = '';
+            this._styleHeight = '';
+            this.blurCount = 0;
+
+            const self = this;
+            this.style = {
+                get transform() {
+                    return self._transform;
+                },
+                set transform(val) {
+                    self._transform = String(val);
+                    self.events.push({ type: 'transform', target: self, value: self._transform });
+                },
+                get height() {
+                    return self._styleHeight;
+                },
+                set height(val) {
+                    self._styleHeight = String(val);
+                },
+            };
+
+            if (id) {
+                ownerDoc.elementsById.set(id, this);
+            }
+        }
+
+        setAttribute(name, value) {
+            const str = String(value);
+            this.attributes.set(name, str);
+            if (name === 'data-y') {
+                this.events.push({ type: 'data-y', target: this, value: str });
+            }
+        }
+
+        getAttribute(name) {
+            return this.attributes.has(name) ? this.attributes.get(name) : null;
+        }
+
+        appendChild(node) {
+            if (node instanceof FocusMockDocumentFragment) {
+                this.children.push(...node.children);
+                node.children = [];
+                return node;
+            }
+            this.children.push(node);
+            return node;
+        }
+
+        contains(target) {
+            if (this === target) {
+                return true;
+            }
+            return this.children.some((child) =>
+                typeof child.contains === 'function' ? child.contains(target) : child === target
+            );
+        }
+
+        focus() {
+            this.ownerDoc.activeElement = this;
+        }
+
+        blur() {
+            this.blurCount++;
+            this.events.push({ type: 'blur', target: this });
+            if (this.ownerDoc.activeElement === this) {
+                this.ownerDoc.activeElement = this.ownerDoc.body;
+            }
+        }
+
+        getBoundingClientRect() {
+            return { top: 0, left: 0, width: 600, height: this._height, bottom: this._height, right: 600 };
+        }
+
+        get scrollHeight() {
+            return 2400;
+        }
+
+        set innerHTML(html) {
+            this.children = [];
+            this.ownerDoc.elementsById.clear();
+            if (html.includes('id="container"')) {
+                const container = new FocusMockElement('div', this.ownerDoc, this.events, 'container');
+                const topObserver = new FocusMockElement('div', this.ownerDoc, this.events, 'top-observer');
+                const list = new FocusMockElement('main', this.ownerDoc, this.events, 'virtual-list');
+                const bottomObserver = new FocusMockElement('div', this.ownerDoc, this.events, 'bottom-observer');
+                container.appendChild(topObserver);
+                container.appendChild(list);
+                container.appendChild(bottomObserver);
+                this.appendChild(container);
+            }
+        }
+    }
+
+    function createFocusEnv({ pageSize = 4, totalPages = 5 } = {}) {
+        const events = [];
+        let observerCallback = null;
+
+        const doc = {
+            elementsById: new Map(),
+            activeElement: null,
+            body: null,
+            getElementById(id) {
+                return this.elementsById.get(id) ?? null;
+            },
+            createElement(tag) {
+                return new FocusMockElement(tag, this, events);
+            },
+        };
+        doc.body = new FocusMockElement('body', doc, events, 'body');
+        doc.activeElement = doc.body;
+
+        globalThis.document = doc;
+        globalThis.DocumentFragment = FocusMockDocumentFragment;
+        globalThis.IntersectionObserver = class {
+            constructor(cb) {
+                observerCallback = cb;
+            }
+            observe() {}
+            unobserve() {}
+            disconnect() {}
+        };
+
+        const pages = Array.from({ length: totalPages }, (_, p) =>
+            Array.from({ length: pageSize }, (__, i) => ({
+                title: `Title ${p * pageSize + i}`,
+                body: p === 2 && i === 0 ? '' : `Body ${p * pageSize + i}`,
+            }))
+        );
+
+        const updateTemplate = (card, datum) => {
+            events.push({ type: 'update-data', target: card });
+            const [h3, bodySection] = card.children;
+            h3.textContent = datum.title;
+            bodySection.textContent = datum.body;
+        };
+
+        const getTemplate = (datum) => {
+            const card = new FocusMockElement('article', doc, events);
+            const h3 = new FocusMockElement('h3', doc, events);
+            const bodySection = new FocusMockElement('section', doc, events);
+            const nestedButton = new FocusMockElement('button', doc, events);
+            bodySection.appendChild(nestedButton);
+            card.appendChild(h3);
+            card.appendChild(bodySection);
+            updateTemplate(card, datum);
+            return card;
+        };
+
+        const virtualList = new VirtualList(doc.body, {
+            getPage: async (p) => (p >= 0 && p < pages.length ? pages[p] : []),
+            getTemplate,
+            updateTemplate,
+            pageSize,
+        });
+        virtualList.render();
+
+        const flush = () => new Promise((resolve) => setImmediate(resolve));
+
+        return {
+            doc,
+            events,
+            virtualList,
+            async scrollDown() {
+                observerCallback([{ isIntersecting: true, target: doc.getElementById('bottom-observer') }]);
+                await flush();
+            },
+            async scrollUp() {
+                observerCallback([{ isIntersecting: true, target: doc.getElementById('top-observer') }]);
+                await flush();
+            },
+        };
+    }
+
+    afterEach(() => {
+        delete globalThis.document;
+        delete globalThis.DocumentFragment;
+        delete globalThis.IntersectionObserver;
+    });
+
+    it('removes contenteditable from card_template in index.html', () => {
+        const htmlPath = path.join(__dirname, 'index.html');
+        const html = readFileSync(htmlPath, 'utf8');
+        assert.equal(
+            /contenteditable/i.test(html),
+            false,
+            'Expected card_template in index.html to omit contenteditable attribute'
+        );
+        assert.match(html, /<section\s+class=['"]card__body__content['"]\s*>/);
+    });
+
+    it('blurs activeElement inside recycled top cards before updating data or coordinates on downward scroll', async () => {
+        const env = createFocusEnv({ pageSize: 4, totalPages: 5 });
+
+        // Populate pool to capacity (8 cards: pages 0 and 1)
+        await env.scrollDown();
+        await env.scrollDown();
+        assert.equal(env.virtualList.pool.length, 8);
+
+        // Case 1: Focus a nested descendant inside pool[1] (which will be recycled on page 2)
+        const recycledCard = env.virtualList.pool[1];
+        const nestedFocusable = recycledCard.children[1].children[0];
+        nestedFocusable.focus();
+        assert.equal(env.doc.activeElement, nestedFocusable);
+
+        env.events.length = 0;
+        await env.scrollDown(); // Loads page 2, recycling pool[0..3]
+
+        assert.equal(nestedFocusable.blurCount, 1, 'Focused descendant inside recycled card must be blurred');
+        assert.equal(env.doc.activeElement, env.doc.body);
+
+        const blurIdx = env.events.findIndex((e) => e.type === 'blur' && e.target === nestedFocusable);
+        const firstDataIdx = env.events.findIndex((e) => e.type === 'update-data');
+        const firstCoordIdx = env.events.findIndex((e) => e.type === 'data-y' || e.type === 'transform');
+        assert.ok(blurIdx !== -1, 'Expected blur event to be recorded');
+        assert.ok(blurIdx < firstDataIdx, 'blur() must execute before #updateData mutates recycled DOM text');
+        assert.ok(blurIdx < firstCoordIdx, 'blur() must execute before #updateElement updates coordinates');
+
+        // Empty datum.body on page 2 item 0 populates cleanly
+        assert.equal(env.virtualList.pool[4].children[1].textContent, '');
+
+        // Case 2: Focus directly on a recycled card element itself
+        const directCard = env.virtualList.pool[0];
+        directCard.focus();
+        env.events.length = 0;
+        await env.scrollDown(); // Loads page 3, recycling pool[0..3]
+        assert.equal(directCard.blurCount, 1, 'Directly focused recycled card must be blurred');
+        assert.equal(env.doc.activeElement, env.doc.body);
+    });
+
+    it('blurs activeElement inside recycled bottom cards before updating coordinates on upward scroll', async () => {
+        const env = createFocusEnv({ pageSize: 4, totalPages: 5 });
+
+        // Advance to pages 1..2 in pool (start = 1, end = 3)
+        await env.scrollDown();
+        await env.scrollDown();
+        await env.scrollDown();
+        assert.equal(env.virtualList.start, 1);
+        assert.equal(env.virtualList.end, 3);
+
+        // On upward scroll, pool.slice(pageSize, pool.length) (indices 4..7) are recycled
+        const bottomRecycledCard = env.virtualList.pool[6];
+        const nestedFocusable = bottomRecycledCard.children[1].children[0];
+        nestedFocusable.focus();
+
+        env.events.length = 0;
+        await env.scrollUp(); // Loads page 0, recycling pool[4..7]
+
+        assert.equal(nestedFocusable.blurCount, 1, 'Focused descendant inside upward-recycled card must be blurred');
+        assert.equal(env.doc.activeElement, env.doc.body);
+
+        const blurIdx = env.events.findIndex((e) => e.type === 'blur' && e.target === nestedFocusable);
+        const firstCoordIdx = env.events.findIndex((e) => e.type === 'data-y' || e.type === 'transform');
+        const firstDataIdx = env.events.findIndex((e) => e.type === 'update-data');
+        assert.ok(blurIdx !== -1, 'Expected blur event to be recorded');
+        assert.ok(blurIdx < firstCoordIdx, 'blur() must execute before #updateElement updates upward coordinates');
+        assert.ok(blurIdx < firstDataIdx, 'blur() must execute before #updateData updates recycled content');
+    });
+
+    it('preserves focus when activeElement is inside an unchanged card or outside the virtual list', async () => {
+        const env = createFocusEnv({ pageSize: 4, totalPages: 5 });
+
+        await env.scrollDown();
+        await env.scrollDown();
+
+        // Focus inside pool[5], which stays in the `unchanged` half during downward recycling
+        const unchangedFocusable = env.virtualList.pool[5].children[1].children[0];
+        unchangedFocusable.focus();
+
+        await env.scrollDown(); // Recycles pool[0..3], keeps pool[4..7] unchanged
+        assert.equal(unchangedFocusable.blurCount, 0, 'Focus inside unchanged card must not be blurred');
+        assert.equal(env.doc.activeElement, unchangedFocusable);
+
+        // Now unchangedFocusable is at index 1 in the rotated pool, which stays `unchanged` during upward recycling
+        await env.scrollUp(); // Recycles pool[4..7], keeps pool[0..3] unchanged
+        assert.equal(unchangedFocusable.blurCount, 0, 'Focus inside unchanged card on upward scroll must not be blurred');
+        assert.equal(env.doc.activeElement, unchangedFocusable);
+
+        // Focus an external element outside #virtual-list
+        const externalInput = env.doc.createElement('input');
+        externalInput.focus();
+        await env.scrollDown();
+        assert.equal(externalInput.blurCount, 0, 'External focused control must not be blurred');
+        assert.equal(env.doc.activeElement, externalInput);
+    });
+
+    const chromeCandidates = [
+        process.env.CHROME_BIN,
+        '/usr/bin/google-chrome',
+        '/usr/bin/google-chrome-stable',
+        '/usr/bin/chromium',
+        '/usr/bin/chromium-browser',
+    ].filter(Boolean);
+    const chromeBin = chromeCandidates.find((bin) => existsSync(bin)) ?? null;
+
+    it('renders static cards and prevents viewport focus jumps across scroll recycling in headless Chrome', { skip: !chromeBin }, async (t) => {
+        const MIME_TYPES = {
+            '.html': 'text/html; charset=utf-8',
+            '.js': 'text/javascript; charset=utf-8',
+            '.css': 'text/css; charset=utf-8',
+        };
+        const server = http.createServer((req, res) => {
+            const urlPath = new URL(req.url, 'http://127.0.0.1').pathname;
+            const resolvedPath = path.resolve(REPO_ROOT, `.${urlPath}`);
+            if (!resolvedPath.startsWith(REPO_ROOT) || !existsSync(resolvedPath)) {
+                res.writeHead(404);
+                res.end('Not found');
+                return;
+            }
+            const ext = path.extname(resolvedPath);
+            res.writeHead(200, { 'Content-Type': MIME_TYPES[ext] ?? 'application/octet-stream' });
+            res.end(readFileSync(resolvedPath));
+        });
+        await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+        t.after(() => {
+            server.closeAllConnections?.();
+            server.close();
+        });
+        const { port } = server.address();
+
+        const userDataDir = mkdtempSync(path.join(os.tmpdir(), 'virtual-list-blur-test-'));
+        const proc = spawn(
+            chromeBin,
+            [
+                '--headless',
+                '--no-sandbox',
+                '--disable-gpu',
+                '--disable-dev-shm-usage',
+                '--no-first-run',
+                '--no-default-browser-check',
+                `--user-data-dir=${userDataDir}`,
+                '--window-size=1280,800',
+                '--remote-debugging-port=0',
+                'about:blank',
+            ],
+            { stdio: ['ignore', 'ignore', 'pipe'], detached: true }
+        );
+        t.after(async () => {
+            if (proc.exitCode === null) {
+                try {
+                    process.kill(-proc.pid, 'SIGKILL');
+                } catch {
+                    proc.kill('SIGKILL');
+                }
+                await new Promise((resolve) => proc.once('exit', resolve));
+            }
+            proc.stderr.destroy();
+            rmSync(userDataDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+        });
+
+        const debugPort = await new Promise((resolve, reject) => {
+            let stderr = '';
+            const timer = setTimeout(() => reject(new Error(`Timed out waiting for DevTools: ${stderr}`)), 10_000);
+            proc.stderr.on('data', (chunk) => {
+                stderr += chunk.toString();
+                const match = stderr.match(/DevTools listening on ws:\/\/127\.0\.0\.1:(\d+)\//);
+                if (match) {
+                    clearTimeout(timer);
+                    resolve(Number(match[1]));
+                }
+            });
+        });
+
+        const targets = await (await fetch(`http://127.0.0.1:${debugPort}/json/list`)).json();
+        const pageTarget = targets.find((target) => target.type === 'page');
+        const ws = new WebSocket(pageTarget.webSocketDebuggerUrl);
+        await new Promise((resolve, reject) => {
+            ws.addEventListener('open', resolve, { once: true });
+            ws.addEventListener('error', reject, { once: true });
+        });
+        t.after(() => {
+            try {
+                ws.close();
+            } catch {}
+        });
+
+        let nextId = 1;
+        const pending = new Map();
+        ws.addEventListener('message', (event) => {
+            const msg = JSON.parse(event.data);
+            if (msg.id && pending.has(msg.id)) {
+                const { resolve, reject } = pending.get(msg.id);
+                pending.delete(msg.id);
+                msg.error ? reject(new Error(msg.error.message)) : resolve(msg.result);
+            }
+        });
+        const send = (method, params = {}) =>
+            new Promise((resolve, reject) => {
+                const id = nextId++;
+                pending.set(id, { resolve, reject });
+                ws.send(JSON.stringify({ id, method, params }));
+            });
+        const evaluate = async (expression) => {
+            const res = await send('Runtime.evaluate', { expression, awaitPromise: true, returnByValue: true });
+            if (res.exceptionDetails) {
+                throw new Error(res.exceptionDetails.exception?.description ?? res.exceptionDetails.text);
+            }
+            return res.result.value;
+        };
+        const waitFor = async (expr, timeoutMs = 8_000) => {
+            const deadline = Date.now() + timeoutMs;
+            while (Date.now() < deadline) {
+                if (await evaluate(`Boolean(${expr})`)) {
+                    return;
+                }
+                await new Promise((r) => setTimeout(r, 40));
+            }
+            throw new Error(`Timed out waiting for: ${expr}`);
+        };
+
+        await send('Page.enable');
+        await send('Runtime.enable');
+        await send('Emulation.setFocusEmulationEnabled', { enabled: true });
+        await send('Page.navigate', {
+            url: `http://127.0.0.1:${port}/5-virtualisation/5-6-scroll-preservation/end/index.html`,
+        });
+
+        // Page 0 loads 10 static cards
+        await waitFor(`document.querySelectorAll('#virtual-list .card').length === 10`);
+        const initialCheck = await evaluate(`(() => {
+            const bodies = Array.from(document.querySelectorAll('.card__body__content'));
+            return {
+                count: bodies.length,
+                anyEditable: bodies.some((el) => el.isContentEditable || el.hasAttribute('contenteditable')),
+                firstText: bodies[0].textContent.trim(),
+            };
+        })()`);
+        assert.equal(initialCheck.count, 10);
+        assert.equal(initialCheck.anyEditable, false, 'Rendered card bodies must not be contenteditable');
+        assert.equal(initialCheck.firstText, '[Entry 0] - Frontend System Design');
+
+        // Scroll to bottom-observer to load Page 1 (fills pool to 20 cards)
+        await evaluate(`document.getElementById('bottom-observer').scrollIntoView()`);
+        await waitFor(`document.querySelectorAll('#virtual-list .card').length === 20`);
+
+        // Attach a focusable button inside Entry 0 (first card in pool, which will be recycled next)
+        await evaluate(`(() => {
+            const firstCard = Array.from(document.querySelectorAll('#virtual-list .card'))
+                .find((c) => c.querySelector('h3')?.textContent.includes('[Entry 0]'));
+            const btn = document.createElement('button');
+            btn.id = 'recycled-focus-probe';
+            btn.textContent = 'Focus Probe';
+            firstCard.appendChild(btn);
+            window.__blurredBeforeTransform = false;
+            const nativeBlur = btn.blur.bind(btn);
+            btn.blur = () => {
+                window.__blurredBeforeTransform = firstCard.getAttribute('data-y') === '0';
+                nativeBlur();
+            };
+            btn.focus({ preventScroll: true });
+        })()`);
+        assert.equal(await evaluate(`document.activeElement?.id`), 'recycled-focus-probe');
+
+        // Scroll to bottom-observer to trigger Page 2 (recycles Entries 0..9 -> Entries 20..29)
+        await evaluate(`document.getElementById('bottom-observer').scrollIntoView()`);
+        await waitFor(
+            `Array.from(document.querySelectorAll('#virtual-list .card h3')).some((h) => h.textContent.includes('[Entry 29]'))`
+        );
+
+        const afterDownRecycle = await evaluate(`({
+            activeTag: document.activeElement?.tagName,
+            blurredBeforeTransform: window.__blurredBeforeTransform,
+            anyEditable: Array.from(document.querySelectorAll('.card__body__content')).some(
+                (el) => el.isContentEditable || el.hasAttribute('contenteditable')
+            ),
+        })`);
+        assert.equal(afterDownRecycle.activeTag, 'BODY', 'Recycled focused element should blur to BODY');
+        assert.equal(afterDownRecycle.blurredBeforeTransform, true, 'blur() should fire before data-y coordinate update');
+        assert.equal(afterDownRecycle.anyEditable, false);
+
+        // Scroll back up to top-observer to trigger upward recycling (Entries 20..29 recycled back to 0..9)
+        await evaluate(`document.getElementById('top-observer').scrollIntoView()`);
+        await waitFor(
+            `Array.from(document.querySelectorAll('#virtual-list .card h3')).some((h) => h.textContent.includes('[Entry 0]'))`
+        );
+        const hasEntry0 = await evaluate(
+            `Array.from(document.querySelectorAll('#virtual-list .card h3')).some((h) => h.textContent.includes('[Entry 0]'))`
+        );
+        assert.equal(hasEntry0, true);
     });
 });

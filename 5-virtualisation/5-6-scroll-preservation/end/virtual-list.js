@@ -97,11 +97,8 @@ export class VirtualList {
                 if (entry.isIntersecting) {
                     const id = entry.target.id;
                     if (id === 'top-observer' && this.start > 0) {
-                        void this.#handleTopObserver();
-                    } else if (id === 'bottom-observer' && this.hasMore) {
-                        void this.#handleBottomObserver();
                         void this.#handleTopObserver().catch(() => {});
-                    } else if (id === 'bottom-observer') {
+                    } else if (id === 'bottom-observer' && this.hasMore) {
                         void this.#handleBottomObserver().catch(() => {});
                     }
                 }
@@ -127,14 +124,11 @@ export class VirtualList {
      * @returns Promise<void>
      */
     async #handleBottomObserver() {
-        if (this.isLoading || !this.hasMore) {
-            return;
-        }
-        this.isLoading = true;
-        if (this.#isLoading) {
+        if (this.#isLoading || this.isLoading || !this.hasMore) {
             return;
         }
         this.#isLoading = true;
+        this.isLoading = true;
         try {
             const container = getContainer();
             const list = getList();
@@ -145,7 +139,6 @@ export class VirtualList {
                 if (bottomObserver) {
                     this.observer?.unobserve?.(bottomObserver);
                 }
-            if (!data?.length) {
                 return;
             }
             this.end++;
@@ -160,6 +153,7 @@ export class VirtualList {
                     this.pool.slice(this.props.pageSize, this.pool.length),
                     this.pool.slice(0, this.props.pageSize)
                 ];
+                this.#blurActiveInRecycled(recycled);
                 this.pool = [].concat(
                     unchanged,
                     recycled
@@ -180,17 +174,22 @@ export class VirtualList {
      * @returns Promise<void>
      */
     async #handleTopObserver() {
-        if (this.#isLoading) {
+        if (this.#isLoading || this.isLoading || this.start <= 0) {
             return;
         }
         this.#isLoading = true;
+        this.isLoading = true;
         try {
             const data = await this.props.getPage(this.start - 1);
+            if (!Array.isArray(data) || data.length === 0) {
+                return;
+            }
             this.start--;
             const [recycled, unchanged] = [
                 this.pool.slice(this.props.pageSize, this.pool.length),
                 this.pool.slice(0, this.props.pageSize)
             ];
+            this.#blurActiveInRecycled(recycled);
             this.pool = [].concat(
                 recycled,
                 unchanged
@@ -199,7 +198,37 @@ export class VirtualList {
             this.#updateData(recycled, data);
             this.end--;
         } finally {
+            this.isLoading = false;
             this.#isLoading = false;
+        }
+    }
+
+    /**
+     * Blurs `document.activeElement` if focus resides on or inside any element
+     * being recycled so coordinate updates do not trigger browser focus jumps.
+     *
+     * @param recycled {HTMLElement[]}
+     * @return {void}
+     */
+    #blurActiveInRecycled(recycled) {
+        const activeElement = typeof document !== 'undefined' ? document.activeElement : null;
+        if (!activeElement || typeof activeElement.blur !== 'function') {
+            return;
+        }
+        const containsTarget = (root, target) => {
+            if (root === target) {
+                return true;
+            }
+            if (typeof root?.contains === 'function') {
+                return root.contains(target);
+            }
+            if (Array.isArray(root?.children)) {
+                return root.children.some((child) => containsTarget(child, target));
+            }
+            return false;
+        };
+        if (recycled.some((el) => containsTarget(el, activeElement))) {
+            document.activeElement.blur();
         }
     }
 
