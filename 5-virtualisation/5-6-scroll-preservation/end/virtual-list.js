@@ -114,10 +114,14 @@ export class VirtualList {
         const container = getContainer();
         const list = getList();
         const data = await this.props.getPage(this.end++);
-        const fragment = new DocumentFragment();
-        const elements = data.map(datum => this.props.getTemplate(datum))
-        elements.forEach(el => fragment.appendChild(el));
+        if (!data?.length) {
+            this.end--;
+            return;
+        }
         if (this.pool.length < this.poolLimit) {
+            const fragment = new DocumentFragment();
+            const elements = data.map(datum => this.props.getTemplate(datum))
+            elements.forEach(el => fragment.appendChild(el));
             this.pool.push(...elements)
             list.appendChild(fragment);
         } else {
