@@ -35,6 +35,7 @@ function y(element, value = undefined) {
 }
 
 export class VirtualList {
+    #isLoading = false;
     #pendingLoads = 0;
     #setSize = -1;
     #maxKnownItems = 0;
@@ -57,6 +58,7 @@ export class VirtualList {
         this.root = root;
         this.pool = [];
         this.poolLimit = this.props.pageSize * 2;
+        this.#isLoading = false;
         const configuredSize = this.props.setSize ?? this.props.totalItems;
         if (Number.isInteger(configuredSize) && configuredSize > 0) {
             this.#setSize = configuredSize;
@@ -109,13 +111,19 @@ export class VirtualList {
      */
     #handleIntersection() {
         return (entries) => {
+            if (this.#isLoading) {
+                return;
+            }
             for (const entry of entries) {
+                if (this.#isLoading) {
+                    return;
+                }
                 if (entry.isIntersecting) {
                     const id = entry.target.id;
                     if (id === 'top-observer' && this.start > 0) {
-                        void this.#handleTopObserver();
+                        void this.#handleTopObserver().catch(() => {});
                     } else if (id === 'bottom-observer') {
-                        void this.#handleBottomObserver();
+                        void this.#handleBottomObserver().catch(() => {});
                     }
                 }
             }
@@ -139,27 +147,25 @@ export class VirtualList {
      * @returns Promise<void>
      */
     async #handleBottomObserver() {
+        if (this.#isLoading) {
+            return;
+        }
+        this.#isLoading = true;
         const container = getContainer();
         const list = getList();
-        const pageIndex = this.end++;
+        const pageIndex = this.end;
         let busyReleased = false;
         this.#beginLoad(list);
         try {
-            let data;
-            try {
-                data = await this.props.getPage(pageIndex);
-            } catch (err) {
-                this.end--;
-                throw err;
-            }
+            const data = await this.props.getPage(pageIndex);
             if (!data?.length) {
-                this.end--;
                 if (this.#setSize === -1 && this.#maxKnownItems > 0) {
                     this.#setSize = this.#maxKnownItems;
                     this.#syncPoolSetSize();
                 }
                 return;
             }
+            this.end++;
             const basePosInSet = pageIndex * this.props.pageSize + 1;
             const batchEnd = basePosInSet + data.length - 1;
             if (batchEnd > this.#maxKnownItems) {
@@ -202,6 +208,7 @@ export class VirtualList {
             if (!busyReleased) {
                 this.#endLoad(list);
             }
+            this.#isLoading = false;
         }
     }
 
@@ -210,22 +217,20 @@ export class VirtualList {
      * @returns Promise<void>
      */
     async #handleTopObserver() {
+        if (this.#isLoading) {
+            return;
+        }
+        this.#isLoading = true;
         const list = getList();
-        const pageIndex = --this.start;
+        const pageIndex = this.start - 1;
         let busyReleased = false;
         this.#beginLoad(list);
         try {
-            let data;
-            try {
-                data = await this.props.getPage(pageIndex);
-            } catch (err) {
-                this.start++;
-                throw err;
-            }
+            const data = await this.props.getPage(pageIndex);
             if (!data?.length) {
-                this.start++;
                 return;
             }
+            this.start--;
             const basePosInSet = pageIndex * this.props.pageSize + 1;
             const batchEnd = basePosInSet + data.length - 1;
             const [recycled, unchanged] = [
@@ -246,6 +251,7 @@ export class VirtualList {
             if (!busyReleased) {
                 this.#endLoad(list);
             }
+            this.#isLoading = false;
         }
     }
 
