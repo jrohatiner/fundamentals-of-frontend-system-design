@@ -30,6 +30,12 @@
     padding: 0 1rem;
 }
 
+[data-placeholder]:empty::before {
+    content: attr(data-placeholder);
+    color: #757575;
+    pointer-events: none;
+}
+
 #top-observer, #bottom-observer {
     width: 100%;
     height: 1px;
