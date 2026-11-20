@@ -50,8 +50,7 @@ function y(element, value = undefined) {
 }
 
 export class VirtualList {
-    #isFetchingTop = false;
-    #isFetchingBottom = false;
+    #isLoading = false;
     #onScroll = null;
 
     /**
@@ -70,6 +69,7 @@ export class VirtualList {
         this.root = root;
         this.pool = [];
         this.poolLimit = this.props.pageSize * 2;
+        this.#isLoading = false;
     }
 
     /**
@@ -104,13 +104,19 @@ export class VirtualList {
      */
     #handleIntersection() {
         return (entries) => {
+            if (this.#isLoading) {
+                return;
+            }
             for (const entry of entries) {
+                if (this.#isLoading) {
+                    return;
+                }
                 if (entry.isIntersecting) {
                     const id = entry.target.id;
                     if (id === 'top-observer' && this.start > 0) {
-                        void this.#handleTopObserver();
+                        void this.#handleTopObserver().catch(() => {});
                     } else if (id === 'bottom-observer') {
-                        void this.#handleBottomObserver();
+                        void this.#handleBottomObserver().catch(() => {});
                     }
                 }
             }
@@ -132,10 +138,10 @@ export class VirtualList {
                 window.removeEventListener('scroll', this.#onScroll);
             }
             this.#onScroll = () => {
-                if (this.start > 0 && !this.#isFetchingTop && this.pool.length > 0) {
+                if (this.start > 0 && !this.#isLoading && this.pool.length > 0) {
                     const topY = +(y(this.pool[0]) ?? 0);
                     if ((window.scrollY ?? 0) < topY) {
-                        void this.#handleTopObserver();
+                        void this.#handleTopObserver().catch(() => {});
                     }
                 }
             };
@@ -148,18 +154,18 @@ export class VirtualList {
      * @returns Promise<void>
      */
     async #handleBottomObserver() {
-        if (this.#isFetchingBottom) {
+        if (this.#isLoading) {
             return;
         }
-        this.#isFetchingBottom = true;
+        this.#isLoading = true;
         try {
             const container = getContainer();
             const list = getList();
-            const data = await this.props.getPage(this.end++);
+            const data = await this.props.getPage(this.end);
             if (!data?.length) {
-                this.end--;
                 return;
             }
+            this.end++;
             if (this.pool.length < this.poolLimit) {
                 const fragment = new DocumentFragment();
                 const elements = data.map(datum => this.props.getTemplate(datum))
@@ -181,7 +187,7 @@ export class VirtualList {
             this.#updateElement("down");
             syncContainerHeight(container);
         } finally {
-            this.#isFetchingBottom = false;
+            this.#isLoading = false;
         }
     }
 
@@ -190,17 +196,17 @@ export class VirtualList {
      * @returns Promise<void>
      */
     async #handleTopObserver() {
-        if (this.#isFetchingTop || this.start <= 0) {
+        if (this.#isLoading || this.start <= 0) {
             return;
         }
-        this.#isFetchingTop = true;
+        this.#isLoading = true;
         try {
             const container = getContainer();
-            const data = await this.props.getPage(--this.start);
+            const data = await this.props.getPage(this.start - 1);
             if (!data?.length) {
-                this.start++;
                 return;
             }
+            this.start--;
             const recycleCount = Math.min(data.length, this.props.pageSize, this.pool.length);
             const [recycled, unchanged] = [
                 this.pool.slice(this.pool.length - recycleCount, this.pool.length),
@@ -231,7 +237,7 @@ export class VirtualList {
                 syncContainerHeight(container);
             }
         } finally {
-            this.#isFetchingTop = false;
+            this.#isLoading = false;
         }
     }
 
