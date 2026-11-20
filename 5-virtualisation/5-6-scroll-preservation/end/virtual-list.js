@@ -78,6 +78,9 @@ export class VirtualList {
         this.root = root;
         this.pool = [];
         this.poolLimit = this.props.pageSize * 2;
+        this.hasMore = true;
+        this.isLoading = false;
+        this.observer = null;
     }
 
     /**
@@ -112,11 +115,11 @@ export class VirtualList {
      */
     #handleIntersection() {
         return (entries) => {
-            if (this.#isFetching) {
+            if (this.#isFetching || this.isLoading) {
                 return;
             }
             for (const entry of entries) {
-                if (this.#isFetching) {
+                if (this.#isFetching || this.isLoading) {
                     return;
                 }
                 if (entry.isIntersecting) {
@@ -124,7 +127,7 @@ export class VirtualList {
                     if (id === 'top-observer' && this.start > 0) {
                         void this.#handleTopObserver();
                         return;
-                    } else if (id === 'bottom-observer') {
+                    } else if (id === 'bottom-observer' && this.hasMore) {
                         void this.#handleBottomObserver();
                         return;
                     }
@@ -138,11 +141,12 @@ export class VirtualList {
      * @returns void
      */
     #effect() {
-        intersectionObserver(
+        this.observer?.disconnect();
+        this.observer = intersectionObserver(
             getObservers(),
             this.#handleIntersection(),
             {}
-        )
+        );
     }
 
     /**
@@ -150,10 +154,11 @@ export class VirtualList {
      * @returns Promise<void>
      */
     async #handleBottomObserver() {
-        if (this.#isFetching) {
+        if (this.#isFetching || this.isLoading || !this.hasMore) {
             return;
         }
         this.#isFetching = true;
+        this.isLoading = true;
         let didUpdate = false;
         let failed = false;
         try {
@@ -161,7 +166,13 @@ export class VirtualList {
             const list = getList();
             const page = this.end;
             const data = await this.props.getPage(page);
-            if (data?.length) {
+            if (!Array.isArray(data) || data.length === 0) {
+                this.hasMore = false;
+                const [, bottomObserver] = getObservers();
+                if (bottomObserver) {
+                    this.observer?.unobserve?.(bottomObserver);
+                }
+            } else {
                 this.end = page + 1;
                 if (this.pool.length < this.poolLimit) {
                     const fragment = new DocumentFragment();
@@ -191,6 +202,7 @@ export class VirtualList {
             failed = true;
         } finally {
             this.#isFetching = false;
+            this.isLoading = false;
         }
         if (!failed) {
             this.#checkSentinelVisibility(didUpdate ? null : 'bottom-observer');
@@ -202,10 +214,11 @@ export class VirtualList {
      * @returns Promise<void>
      */
     async #handleTopObserver() {
-        if (this.#isFetching || this.start <= 0) {
+        if (this.#isFetching || this.isLoading || this.start <= 0) {
             return;
         }
         this.#isFetching = true;
+        this.isLoading = true;
         let didUpdate = false;
         let failed = false;
         try {
@@ -224,12 +237,20 @@ export class VirtualList {
                 this.#updateData(recycled, data);
                 this.#updateElement("up");
                 this.end--;
+                if (!this.hasMore) {
+                    this.hasMore = true;
+                    const [, bottomObserver] = getObservers();
+                    if (bottomObserver) {
+                        this.observer?.observe?.(bottomObserver);
+                    }
+                }
                 didUpdate = true;
             }
         } catch {
             failed = true;
         } finally {
             this.#isFetching = false;
+            this.isLoading = false;
         }
         if (!failed) {
             this.#checkSentinelVisibility(didUpdate ? null : 'top-observer');
@@ -244,7 +265,7 @@ export class VirtualList {
      * @returns {void}
      */
     #checkSentinelVisibility(skipObserverId = null) {
-        if (this.#isFetching || this.pool.length === 0) {
+        if (this.#isFetching || this.isLoading || this.pool.length === 0) {
             return;
         }
         const viewportHeight = getViewportHeight();
@@ -263,7 +284,7 @@ export class VirtualList {
         }
 
         const canCheckTop = skipObserverId !== 'top-observer' && this.start > 0 && hasLayoutBox(topRect);
-        const canCheckBottom = skipObserverId !== 'bottom-observer' && hasLayoutBox(bottomRect);
+        const canCheckBottom = skipObserverId !== 'bottom-observer' && this.hasMore && hasLayoutBox(bottomRect);
 
         const atTopBoundary = canCheckTop && topRect.bottom >= topRect.height * OBSERVER_THRESHOLD;
         const atBottomBoundary = canCheckBottom && bottomRect.top <= viewportHeight - bottomRect.height * OBSERVER_THRESHOLD;
