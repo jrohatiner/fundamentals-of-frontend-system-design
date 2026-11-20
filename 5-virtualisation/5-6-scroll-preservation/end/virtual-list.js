@@ -69,6 +69,9 @@ export class VirtualList {
         this.root = root;
         this.pool = [];
         this.poolLimit = this.props.pageSize * 2;
+        this.hasMore = true;
+        this.isLoading = false;
+        this.observer = null;
         this.#isLoading = false;
     }
 
@@ -104,18 +107,18 @@ export class VirtualList {
      */
     #handleIntersection() {
         return (entries) => {
-            if (this.#isLoading) {
+            if (this.#isLoading || this.isLoading) {
                 return;
             }
             for (const entry of entries) {
-                if (this.#isLoading) {
+                if (this.#isLoading || this.isLoading) {
                     return;
                 }
                 if (entry.isIntersecting) {
                     const id = entry.target.id;
                     if (id === 'top-observer' && this.start > 0) {
                         void this.#handleTopObserver().catch(() => {});
-                    } else if (id === 'bottom-observer') {
+                    } else if (id === 'bottom-observer' && this.hasMore) {
                         void this.#handleBottomObserver().catch(() => {});
                     }
                 }
@@ -128,7 +131,8 @@ export class VirtualList {
      * @returns void
      */
     #effect() {
-        intersectionObserver(
+        this.observer?.disconnect();
+        this.observer = intersectionObserver(
             getObservers(),
             this.#handleIntersection(),
             {}
@@ -138,7 +142,7 @@ export class VirtualList {
                 window.removeEventListener('scroll', this.#onScroll);
             }
             this.#onScroll = () => {
-                if (this.start > 0 && !this.#isLoading && this.pool.length > 0) {
+                if (this.start > 0 && !this.#isLoading && !this.isLoading && this.pool.length > 0) {
                     const topY = +(y(this.pool[0]) ?? 0);
                     if ((window.scrollY ?? 0) < topY) {
                         void this.#handleTopObserver().catch(() => {});
@@ -154,15 +158,21 @@ export class VirtualList {
      * @returns Promise<void>
      */
     async #handleBottomObserver() {
-        if (this.#isLoading) {
+        if (this.#isLoading || this.isLoading || !this.hasMore) {
             return;
         }
         this.#isLoading = true;
+        this.isLoading = true;
         try {
             const container = getContainer();
             const list = getList();
             const data = await this.props.getPage(this.end);
-            if (!data?.length) {
+            if (!Array.isArray(data) || data.length === 0) {
+                this.hasMore = false;
+                const [, bottomObserver] = getObservers();
+                if (bottomObserver) {
+                    this.observer?.unobserve?.(bottomObserver);
+                }
                 return;
             }
             this.end++;
@@ -188,6 +198,7 @@ export class VirtualList {
             syncContainerHeight(container);
         } finally {
             this.#isLoading = false;
+            this.isLoading = false;
         }
     }
 
@@ -196,14 +207,15 @@ export class VirtualList {
      * @returns Promise<void>
      */
     async #handleTopObserver() {
-        if (this.#isLoading || this.start <= 0) {
+        if (this.#isLoading || this.isLoading || this.start <= 0) {
             return;
         }
         this.#isLoading = true;
+        this.isLoading = true;
         try {
             const container = getContainer();
             const data = await this.props.getPage(this.start - 1);
-            if (!data?.length) {
+            if (!Array.isArray(data) || data.length === 0) {
                 return;
             }
             this.start--;
@@ -219,6 +231,13 @@ export class VirtualList {
             this.#updateData(recycled, data);
             const { anchorDelta, topY } = this.#updateElement("up", recycleCount);
             this.end--;
+            if (!this.hasMore) {
+                this.hasMore = true;
+                const [, bottomObserver] = getObservers();
+                if (bottomObserver) {
+                    this.observer?.observe?.(bottomObserver);
+                }
+            }
 
             if (typeof window !== 'undefined') {
                 const currentScrollY = window.scrollY ?? 0;
@@ -238,6 +257,7 @@ export class VirtualList {
             }
         } finally {
             this.#isLoading = false;
+            this.isLoading = false;
         }
     }
 
