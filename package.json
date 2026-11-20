@@ -1,0 +1,8 @@
+{
+  "name": "fundamentals-of-frontend-system-design",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test"
+  }
+}
