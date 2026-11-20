@@ -94,16 +94,21 @@ async function launchHeadlessChrome() {
             }
         });
 
+        proc.once('error', (err) => {
+            clearTimeout(timer);
+            reject(err);
+        });
+
         proc.once('exit', (code) => {
             clearTimeout(timer);
             reject(new Error(`Chrome exited prematurely with code ${code}. Stderr: ${stderr}`));
         });
     });
 
-    const targetsResponse = await fetch(`http://127.0.0.1:${debugPort}/json/list`);
-    const targets = await targetsResponse.json();
-    const pageTarget = targets.find((target) => target.type === 'page');
-    assert.ok(pageTarget?.webSocketDebuggerUrl, 'Expected a debuggable page target');
+    const targetsRes = await fetch(`http://127.0.0.1:${debugPort}/json/list`);
+    const targets = await targetsRes.json();
+    const pageTarget = targets.find((t) => t.type === 'page');
+    assert.ok(pageTarget?.webSocketDebuggerUrl, 'Expected a debuggable page target in headless Chrome');
 
     const ws = new WebSocket(pageTarget.webSocketDebuggerUrl);
     await new Promise((resolve, reject) => {
@@ -111,28 +116,28 @@ async function launchHeadlessChrome() {
         ws.addEventListener('error', reject, { once: true });
     });
 
-    let nextId = 1;
+    let nextCommandId = 0;
     const pending = new Map();
     const exceptions = [];
 
     ws.addEventListener('message', (event) => {
-        const message = JSON.parse(event.data);
-        if (message.method === 'Runtime.exceptionThrown') {
-            exceptions.push(message.params.exceptionDetails);
+        const msg = JSON.parse(event.data);
+        if (msg.method === 'Runtime.exceptionThrown') {
+            exceptions.push(msg.params.exceptionDetails);
         }
-        if (message.id && pending.has(message.id)) {
-            const { resolve, reject } = pending.get(message.id);
-            pending.delete(message.id);
-            if (message.error) {
-                reject(new Error(message.error.message));
+        if (msg.id && pending.has(msg.id)) {
+            const { resolve, reject } = pending.get(msg.id);
+            pending.delete(msg.id);
+            if (msg.error) {
+                reject(new Error(`CDP ${msg.error.message}`));
             } else {
-                resolve(message.result);
+                resolve(msg.result);
             }
         }
     });
 
     function send(method, params = {}) {
-        const id = nextId++;
+        const id = ++nextCommandId;
         return new Promise((resolve, reject) => {
             pending.set(id, { resolve, reject });
             ws.send(JSON.stringify({ id, method, params }));
@@ -140,21 +145,20 @@ async function launchHeadlessChrome() {
     }
 
     async function evaluate(expression) {
-        const response = await send('Runtime.evaluate', {
+        const res = await send('Runtime.evaluate', {
             expression,
             awaitPromise: true,
             returnByValue: true,
         });
-        if (response.exceptionDetails) {
+        if (res.exceptionDetails) {
             throw new Error(
-                response.exceptionDetails.exception?.description ??
-                    response.exceptionDetails.text
+                `Page evaluation failed: ${res.exceptionDetails.exception?.description || res.exceptionDetails.text}`
             );
         }
-        return response.result.value;
+        return res.result.value;
     }
 
-    async function cleanup() {
+    async function close() {
         try {
             ws.close();
         } catch {}
@@ -169,7 +173,7 @@ async function launchHeadlessChrome() {
         await rm(userDataDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
     }
 
-    return { send, evaluate, exceptions, cleanup };
+    return { send, evaluate, exceptions, close };
 }
 
 async function waitForCondition(evaluate, predicateExpr, timeoutMs = 8_000) {
@@ -184,13 +188,312 @@ async function waitForCondition(evaluate, predicateExpr, timeoutMs = 8_000) {
     throw new Error(`Timed out waiting for condition: ${predicateExpr}`);
 }
 
+const INSTRUMENTATION_SCRIPT = `
+(() => {
+    window.__roStats = {
+        instances: 0,
+        observeCalls: [],
+        deliveries: [],
+        consoleLogs: 0,
+        errors: [],
+        styleWrites: { A: { borderRadius: 0, borderWidth: 0 }, B: { borderRadius: 0, borderWidth: 0 }, C: { borderRadius: 0, borderWidth: 0 }, D: { borderRadius: 0, borderWidth: 0 } },
+        datasetWrites: { A: 0, B: 0, C: 0, D: 0 },
+    };
+
+    window.addEventListener('error', (event) => {
+        window.__roStats.errors.push(event.message);
+    });
+
+    const origLog = console.log;
+    console.log = function (...args) {
+        window.__roStats.consoleLogs += 1;
+        return origLog.apply(this, args);
+    };
+
+    function instrumentBoxStyles(el) {
+        if (el.__styleInstrumented) return;
+        el.__styleInstrumented = true;
+        const label = el.textContent.trim();
+        const nativeStyle = el.style;
+        const styleProxy = new Proxy(nativeStyle, {
+            get(target, prop) {
+                const value = Reflect.get(target, prop, target);
+                return typeof value === 'function' ? value.bind(target) : value;
+            },
+            set(target, prop, value) {
+                if (prop === 'borderRadius' || prop === 'borderWidth') {
+                    window.__roStats.styleWrites[label][prop] += 1;
+                }
+                return Reflect.set(target, prop, value, target);
+            },
+        });
+        Object.defineProperty(el, 'style', {
+            configurable: true,
+            get() {
+                return styleProxy;
+            },
+        });
+
+        const attrObserver = new MutationObserver((records) => {
+            for (const rec of records) {
+                if (rec.attributeName === 'data-small') {
+                    window.__roStats.datasetWrites[label] += 1;
+                }
+            }
+        });
+        attrObserver.observe(el, { attributes: true, attributeFilter: ['data-small'] });
+    }
+
+    const NativeResizeObserver = window.ResizeObserver;
+    window.ResizeObserver = class InstrumentedResizeObserver extends NativeResizeObserver {
+        constructor(callback) {
+            window.__roStats.instances += 1;
+            super((entries, observer) => {
+                window.__roStats.deliveries.push(
+                    entries.map((entry) => ({
+                        box: entry.target.textContent.trim(),
+                        inlineSize: entry.borderBoxSize[0].inlineSize,
+                        blockSize: entry.borderBoxSize[0].blockSize,
+                    }))
+                );
+                return callback(entries, observer);
+            });
+        }
+
+        observe(target, options) {
+            instrumentBoxStyles(target);
+            window.__roStats.observeCalls.push({
+                box: target.textContent.trim(),
+                options: options ?? null,
+            });
+            return super.observe(target, options);
+        }
+    };
+})();
+`;
+
+async function settleFrames(evaluate, frames = 4) {
+    await evaluate(`new Promise((resolve) => {
+        let remaining = ${frames};
+        function tick() {
+            if (--remaining <= 0) resolve();
+            else requestAnimationFrame(tick);
+        }
+        requestAnimationFrame(tick);
+    })`);
+}
+
+test('ResizeObserver guards threshold state, avoids secondary loops, and eliminates console logging', async (t) => {
+    const { server, baseUrl } = await startStaticServer(REPO_ROOT);
+    const chrome = await launchHeadlessChrome();
+
+    t.after(async () => {
+        await chrome.close();
+        await new Promise((resolve) => server.close(resolve));
+    });
+
+    await chrome.send('Page.enable');
+    await chrome.send('Runtime.enable');
+    await chrome.send('Page.addScriptToEvaluateOnNewDocument', { source: INSTRUMENTATION_SCRIPT });
+
+    await chrome.send('Page.navigate', { url: `${baseUrl}/4-resize-observer/end/index.html` });
+    await settleFrames(chrome.evaluate, 5);
+
+    // 1. Verify initial render (>= 150px)
+    const initial = await chrome.evaluate(`(() => {
+        const boxes = [...document.querySelectorAll('.box')].map((el) => ({
+            label: el.textContent.trim(),
+            small: el.dataset.small,
+            borderRadius: el.style.borderRadius,
+            borderWidth: el.style.borderWidth,
+            computedBorderWidth: getComputedStyle(el).borderTopWidth,
+        }));
+        return { stats: window.__roStats, boxes };
+    })()`);
+
+    assert.equal(initial.stats.instances, 1, 'Expected a single ResizeObserver instance');
+    assert.equal(initial.stats.observeCalls.length, 4, 'Expected all 4 .box elements to be observed');
+    for (const call of initial.stats.observeCalls) {
+        assert.deepEqual(call.options, { box: 'border-box' }, 'Expected border-box observation');
+    }
+    assert.equal(initial.stats.deliveries.length, 1, 'Expected exactly 1 initial ResizeObserver delivery batch');
+    assert.equal(initial.stats.consoleLogs, 0, 'Expected zero console.log calls');
+    assert.deepEqual(initial.stats.errors, [], 'Expected zero ResizeObserver loop errors');
+
+    for (const box of initial.boxes) {
+        assert.equal(box.small, 'false', `Expected initial data-small="false" on box ${box.label}`);
+        assert.equal(box.borderRadius, '', `Expected initial inline borderRadius to remain unset on box ${box.label}`);
+        assert.equal(box.borderWidth, '', `Expected initial inline borderWidth to remain unset on box ${box.label}`);
+        assert.equal(box.computedBorderWidth, '2px', `Expected initial 2px CSS border preserved on box ${box.label}`);
+        assert.deepEqual(
+            initial.stats.styleWrites[box.label],
+            { borderRadius: 0, borderWidth: 0 },
+            `Expected zero style mutations on initial >=150px render for box ${box.label}`
+        );
+    }
+
+    // Helper to resize Box A and return deltas
+    async function resizeBox(index, widthPx, heightPx) {
+        await chrome.evaluate(`(() => {
+            window.__roStats.deliveries = [];
+            const box = document.querySelectorAll('.box')[${index}];
+            box.style.width = '${widthPx}px';
+            box.style.height = '${heightPx}px';
+        })()`);
+        await settleFrames(chrome.evaluate, 4);
+        return chrome.evaluate(`(() => {
+            const box = document.querySelectorAll('.box')[${index}];
+            return {
+                deliveries: window.__roStats.deliveries,
+                consoleLogs: window.__roStats.consoleLogs,
+                errors: window.__roStats.errors,
+                styleWrites: window.__roStats.styleWrites,
+                datasetWrites: window.__roStats.datasetWrites,
+                small: box.dataset.small,
+                borderRadius: box.style.borderRadius,
+                borderWidth: box.style.borderWidth,
+                computedBorderWidth: getComputedStyle(box).borderTopWidth,
+            };
+        })()`);
+    }
+
+    // 2. Resize above threshold, asymmetric single-axis <150px, and exact 150x150 boundary
+    for (const [w, h] of [
+        [260, 180],
+        [200, 160],
+        [140, 160], // inlineSize < 150, blockSize >= 150 -> still not small
+        [160, 140], // inlineSize >= 150, blockSize < 150 -> still not small
+        [150, 150], // exact 150px boundary -> leaves styles unset
+    ]) {
+        const res = await resizeBox(0, w, h);
+        assert.equal(res.deliveries.length, 1, `Expected 1 ResizeObserver delivery at ${w}x${h}`);
+        assert.equal(res.small, 'false', `Expected data-small="false" at ${w}x${h}`);
+        assert.equal(res.borderRadius, '', `Expected inline borderRadius left unset at ${w}x${h}`);
+        assert.equal(res.borderWidth, '', `Expected inline borderWidth left unset at ${w}x${h}`);
+        assert.deepEqual(res.styleWrites.A, { borderRadius: 0, borderWidth: 0 }, `Expected zero style writes at ${w}x${h}`);
+        assert.equal(res.datasetWrites.A, 1, `Expected zero redundant data-small writes at ${w}x${h}`);
+        assert.equal(res.consoleLogs, 0);
+        assert.deepEqual(res.errors, []);
+    }
+
+    // 3. Cross below 150px threshold (149x149) -> mutates style once, zero secondary loop deliveries
+    const crossedSmall = await resizeBox(0, 149, 149);
+    assert.equal(crossedSmall.deliveries.length, 1, 'Expected zero secondary loop deliveries when crossing below 150px');
+    assert.equal(crossedSmall.small, 'true');
+    assert.equal(crossedSmall.borderRadius, '100%');
+    assert.equal(crossedSmall.borderWidth, '4px');
+    assert.equal(crossedSmall.computedBorderWidth, '4px');
+    assert.deepEqual(crossedSmall.styleWrites.A, { borderRadius: 1, borderWidth: 1 });
+    assert.equal(crossedSmall.datasetWrites.A, 2);
+    assert.deepEqual(crossedSmall.errors, []);
+
+    // 4. Resize repeatedly while remaining below 150px -> zero additional style or dataset writes
+    for (const [w, h] of [
+        [130, 130],
+        [115, 115],
+        [100, 100],
+    ]) {
+        const res = await resizeBox(0, w, h);
+        assert.equal(res.deliveries.length, 1, `Expected 1 delivery at ${w}x${h}`);
+        assert.equal(res.small, 'true');
+        assert.equal(res.borderRadius, '100%');
+        assert.equal(res.borderWidth, '4px');
+        assert.deepEqual(res.styleWrites.A, { borderRadius: 1, borderWidth: 1 }, `Expected no extra style writes at ${w}x${h}`);
+        assert.equal(res.datasetWrites.A, 2, `Expected no extra data-small writes at ${w}x${h}`);
+        assert.deepEqual(res.errors, []);
+    }
+
+    // 5. Cross back to exact 150x150 boundary -> unsets styles once, zero secondary loop deliveries
+    const crossedExact150 = await resizeBox(0, 150, 150);
+    assert.equal(crossedExact150.deliveries.length, 1, 'Expected zero secondary loop deliveries when crossing to 150x150');
+    assert.equal(crossedExact150.small, 'false');
+    assert.equal(crossedExact150.borderRadius, 'unset');
+    assert.equal(crossedExact150.borderWidth, 'unset');
+    assert.deepEqual(crossedExact150.styleWrites.A, { borderRadius: 2, borderWidth: 2 });
+    assert.equal(crossedExact150.datasetWrites.A, 3);
+    assert.deepEqual(crossedExact150.errors, []);
+
+    // 6. Resize further above 150px -> zero additional style writes, and independent state on Box B
+    const stayLarge = await resizeBox(0, 200, 190);
+    assert.deepEqual(stayLarge.styleWrites.A, { borderRadius: 2, borderWidth: 2 });
+    assert.equal(stayLarge.datasetWrites.A, 3);
+
+    const boxBSmall = await resizeBox(1, 120, 120);
+    assert.equal(boxBSmall.small, 'true');
+    assert.equal(boxBSmall.borderRadius, '100%');
+    assert.equal(boxBSmall.borderWidth, '4px');
+    assert.deepEqual(boxBSmall.styleWrites.B, { borderRadius: 1, borderWidth: 1 });
+    assert.deepEqual(boxBSmall.styleWrites.A, { borderRadius: 2, borderWidth: 2 });
+    assert.equal(boxBSmall.consoleLogs, 0);
+    assert.deepEqual(boxBSmall.errors, []);
+});
+
+test('Elements initializing below 150px or at exact 150px on first render handle styles cleanly', async (t) => {
+    const { server, baseUrl } = await startStaticServer(REPO_ROOT);
+    const chrome = await launchHeadlessChrome();
+
+    t.after(async () => {
+        await chrome.close();
+        await new Promise((resolve) => server.close(resolve));
+    });
+
+    await chrome.send('Page.enable');
+    await chrome.send('Runtime.enable');
+    await chrome.send('Page.addScriptToEvaluateOnNewDocument', {
+        source: `
+            ${INSTRUMENTATION_SCRIPT}
+            document.addEventListener('DOMContentLoaded', () => {
+                const boxes = document.querySelectorAll('.box');
+                // Box A starts below 150px on first render
+                boxes[0].style.width = '120px';
+                boxes[0].style.height = '120px';
+                // Box B starts at exact 150x150 on first render
+                boxes[1].style.width = '150px';
+                boxes[1].style.height = '150px';
+            }, { capture: true });
+        `,
+    });
+
+    await chrome.send('Page.navigate', { url: `${baseUrl}/4-resize-observer/end/index.html` });
+    await settleFrames(chrome.evaluate, 5);
+
+    const firstRender = await chrome.evaluate(`(() => {
+        const boxes = [...document.querySelectorAll('.box')].map((el) => ({
+            label: el.textContent.trim(),
+            small: el.dataset.small,
+            borderRadius: el.style.borderRadius,
+            borderWidth: el.style.borderWidth,
+            computedBorderWidth: getComputedStyle(el).borderTopWidth,
+        }));
+        return { stats: window.__roStats, boxes };
+    })()`);
+
+    assert.equal(firstRender.stats.deliveries.length, 1, 'Expected single initial notification batch even when Box A starts < 150px');
+    assert.equal(firstRender.stats.consoleLogs, 0);
+    assert.deepEqual(firstRender.stats.errors, []);
+
+    // Box A initialized at 120x120 -> small styles applied on first notification
+    assert.equal(firstRender.boxes[0].small, 'true');
+    assert.equal(firstRender.boxes[0].borderRadius, '100%');
+    assert.equal(firstRender.boxes[0].borderWidth, '4px');
+    assert.equal(firstRender.boxes[0].computedBorderWidth, '4px');
+    assert.deepEqual(firstRender.stats.styleWrites.A, { borderRadius: 1, borderWidth: 1 });
+
+    // Box B initialized at exact 150x150 -> styles left unset
+    assert.equal(firstRender.boxes[1].small, 'false');
+    assert.equal(firstRender.boxes[1].borderRadius, '');
+    assert.equal(firstRender.boxes[1].borderWidth, '');
+    assert.equal(firstRender.boxes[1].computedBorderWidth, '2px');
+    assert.deepEqual(firstRender.stats.styleWrites.B, { borderRadius: 0, borderWidth: 0 });
+});
+
 test('ResizeObserver callback handles borderBoxSize arrays, single objects, and contentRect fallbacks', async (t) => {
     const { server, baseUrl } = await startStaticServer(REPO_ROOT);
-    t.after(() => server.close());
-
     const chrome = await launchHeadlessChrome();
+
     t.after(async () => {
-        await chrome.cleanup();
+        await chrome.close();
+        await new Promise((resolve) => server.close(resolve));
     });
 
     await chrome.send('Page.enable');
@@ -229,13 +532,14 @@ test('ResizeObserver callback handles borderBoxSize arrays, single objects, and 
 
     await waitForCondition(
         chrome.evaluate,
-        `window.__resizeObserverStats.observedCount === 4 && document.querySelectorAll('.box')[0].style.borderRadius === 'unset'`
+        `window.__resizeObserverStats.observedCount === 4 && document.querySelectorAll('.box')[0].dataset.small === 'false'`
     );
 
     const observerMeta = await chrome.evaluate(`({
         instances: window.__resizeObserverStats.instances,
         observedCount: window.__resizeObserverStats.observedCount,
-        initialStyles: Array.from(document.querySelectorAll('.box')).map((el) => ({
+        initialBoxes: Array.from(document.querySelectorAll('.box')).map((el) => ({
+            small: el.dataset.small,
             borderRadius: el.style.borderRadius,
             borderWidth: el.style.borderWidth,
         })),
@@ -243,11 +547,11 @@ test('ResizeObserver callback handles borderBoxSize arrays, single objects, and 
 
     assert.equal(observerMeta.instances, 1, 'Expected a single shared ResizeObserver instance');
     assert.equal(observerMeta.observedCount, 4, 'Expected all 4 .box elements to be observed');
-    assert.deepEqual(observerMeta.initialStyles, [
-        { borderRadius: 'unset', borderWidth: 'unset' },
-        { borderRadius: 'unset', borderWidth: 'unset' },
-        { borderRadius: 'unset', borderWidth: 'unset' },
-        { borderRadius: 'unset', borderWidth: 'unset' },
+    assert.deepEqual(observerMeta.initialBoxes, [
+        { small: 'false', borderRadius: '', borderWidth: '' },
+        { small: 'false', borderRadius: '', borderWidth: '' },
+        { small: 'false', borderRadius: '', borderWidth: '' },
+        { small: 'false', borderRadius: '', borderWidth: '' },
     ]);
 
     // 1. Verify real native ResizeObserver reaction when resizing a .box element in the DOM.
@@ -264,10 +568,12 @@ test('ResizeObserver callback handles borderBoxSize arrays, single objects, and 
     );
 
     const resizedSmallStyle = await chrome.evaluate(`({
+        small: document.querySelectorAll('.box')[0].dataset.small,
         borderRadius: document.querySelectorAll('.box')[0].style.borderRadius,
         borderWidth: document.querySelectorAll('.box')[0].style.borderWidth,
     })`);
     assert.deepEqual(resizedSmallStyle, {
+        small: 'true',
         borderRadius: '100%',
         borderWidth: '4px',
     });
@@ -295,6 +601,7 @@ test('ResizeObserver callback handles borderBoxSize arrays, single objects, and 
             const runCase = (entry) => {
                 callback([entry], instance);
                 return {
+                    small: entry.target.dataset.small,
                     borderRadius: entry.target.style.borderRadius,
                     borderWidth: entry.target.style.borderWidth,
                 };
@@ -362,6 +669,20 @@ test('ResizeObserver callback handles borderBoxSize arrays, single objects, and 
                 }),
             };
 
+            // Prime opposite states so every entry in the mixed batch actively transitions
+            boxes[0].dataset.small = 'false';
+            boxes[0].style.borderRadius = 'unset';
+            boxes[0].style.borderWidth = 'unset';
+            boxes[1].dataset.small = 'true';
+            boxes[1].style.borderRadius = '100%';
+            boxes[1].style.borderWidth = '4px';
+            boxes[2].dataset.small = 'false';
+            boxes[2].style.borderRadius = 'unset';
+            boxes[2].style.borderWidth = 'unset';
+            boxes[3].dataset.small = 'true';
+            boxes[3].style.borderRadius = '100%';
+            boxes[3].style.borderWidth = '4px';
+
             // Multi-entry mixed payload batch in a single callback invocation
             callback(
                 [
@@ -374,6 +695,7 @@ test('ResizeObserver callback handles borderBoxSize arrays, single objects, and 
             );
 
             results.mixedBatch = boxes.map((el) => ({
+                small: el.dataset.small,
                 borderRadius: el.style.borderRadius,
                 borderWidth: el.style.borderWidth,
             }));
@@ -382,8 +704,8 @@ test('ResizeObserver callback handles borderBoxSize arrays, single objects, and 
         })()
     `);
 
-    const CIRCLE = { borderRadius: '100%', borderWidth: '4px' };
-    const UNSET = { borderRadius: 'unset', borderWidth: 'unset' };
+    const CIRCLE = { small: 'true', borderRadius: '100%', borderWidth: '4px' };
+    const UNSET = { small: 'false', borderRadius: 'unset', borderWidth: 'unset' };
 
     assert.deepEqual(simulatedResults.arrayBelowThreshold, CIRCLE);
     assert.deepEqual(simulatedResults.arrayAtThreshold, UNSET);
@@ -405,7 +727,9 @@ test('ResizeObserver callback handles borderBoxSize arrays, single objects, and 
 
 test('ResizeObserver works end-to-end when engine omits borderBoxSize (Safari < 15.4 / polyfill) or exposes single object', async (t) => {
     const { server, baseUrl } = await startStaticServer(REPO_ROOT);
-    t.after(() => server.close());
+    t.after(async () => {
+        await new Promise((resolve) => server.close(resolve));
+    });
 
     for (const mode of ['contentRect-only', 'single-object']) {
         const chrome = await launchHeadlessChrome();
@@ -448,7 +772,7 @@ test('ResizeObserver works end-to-end when engine omits borderBoxSize (Safari < 
 
             await waitForCondition(
                 chrome.evaluate,
-                `document.querySelectorAll('.box')[0].style.borderRadius === 'unset'`
+                `document.querySelectorAll('.box')[0].dataset.small === 'false'`
             );
 
             await chrome.evaluate(`
@@ -464,23 +788,48 @@ test('ResizeObserver works end-to-end when engine omits borderBoxSize (Safari < 
                 `document.querySelectorAll('.box')[0].style.borderRadius === '100%'`
             );
 
-            const boxStyles = await chrome.evaluate(`
+            const boxStylesAfterShrink = await chrome.evaluate(`
                 Array.from(document.querySelectorAll('.box')).map((el) => ({
+                    small: el.dataset.small,
                     borderRadius: el.style.borderRadius,
                     borderWidth: el.style.borderWidth,
                 }))
             `);
 
-            assert.deepEqual(boxStyles, [
-                { borderRadius: '100%', borderWidth: '4px' },
-                { borderRadius: 'unset', borderWidth: 'unset' },
-                { borderRadius: 'unset', borderWidth: 'unset' },
-                { borderRadius: 'unset', borderWidth: 'unset' },
+            assert.deepEqual(boxStylesAfterShrink, [
+                { small: 'true', borderRadius: '100%', borderWidth: '4px' },
+                { small: 'false', borderRadius: '', borderWidth: '' },
+                { small: 'false', borderRadius: '', borderWidth: '' },
+                { small: 'false', borderRadius: '', borderWidth: '' },
             ]);
+
+            await chrome.evaluate(`
+                (() => {
+                    const box = document.querySelectorAll('.box')[0];
+                    box.style.width = '180px';
+                    box.style.height = '180px';
+                })();
+            `);
+
+            await waitForCondition(
+                chrome.evaluate,
+                `document.querySelectorAll('.box')[0].style.borderRadius === 'unset'`
+            );
+
+            const box0AfterEnlarge = await chrome.evaluate(`({
+                small: document.querySelectorAll('.box')[0].dataset.small,
+                borderRadius: document.querySelectorAll('.box')[0].style.borderRadius,
+                borderWidth: document.querySelectorAll('.box')[0].style.borderWidth,
+            })`);
+
+            assert.deepEqual(box0AfterEnlarge, {
+                small: 'false',
+                borderRadius: 'unset',
+                borderWidth: 'unset',
+            });
             assert.equal(chrome.exceptions.length, 0, `Expected zero runtime exceptions in ${mode} mode`);
         } finally {
-            await chrome.cleanup();
+            await chrome.close();
         }
     }
 });
-
