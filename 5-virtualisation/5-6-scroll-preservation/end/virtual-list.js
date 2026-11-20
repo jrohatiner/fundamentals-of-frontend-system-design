@@ -16,6 +16,25 @@ function getContainer() {
   return document.getElementById("container");
 }
 
+function syncContainerHeight(container) {
+  if (!container) {
+    return;
+  }
+  container.style.height = "";
+  container.style.height = `${container.scrollHeight}px`;
+}
+
+function adjustWindowScroll(scrollDelta) {
+  if (!scrollDelta || typeof window === "undefined") {
+    return;
+  }
+  if (typeof window.scrollBy === "function") {
+    window.scrollBy(0, scrollDelta);
+  } else if (typeof window.scrollTo === "function") {
+    window.scrollTo(window.scrollX ?? 0, (window.scrollY ?? 0) + scrollDelta);
+  }
+}
+
 function getViewportHeight() {
   if (
     typeof window !== "undefined" &&
@@ -75,6 +94,7 @@ function y(element, value = undefined) {
 export class VirtualList {
   #hasMore = true;
   #isFetching = false;
+  #onScroll = null;
 
   get hasMore() {
     return this.#hasMore;
@@ -177,6 +197,23 @@ export class VirtualList {
       this.#handleIntersection(),
       {},
     );
+    if (
+      typeof window !== "undefined" &&
+      typeof window.addEventListener === "function"
+    ) {
+      if (this.#onScroll && typeof window.removeEventListener === "function") {
+        window.removeEventListener("scroll", this.#onScroll);
+      }
+      this.#onScroll = () => {
+        if (this.start > 0 && !this.#isFetching && this.pool.length > 0) {
+          const topY = +(y(this.pool[0]) ?? 0);
+          if ((window.scrollY ?? 0) < topY) {
+            void this.#handleTopObserver();
+          }
+        }
+      };
+      window.addEventListener("scroll", this.#onScroll, { passive: true });
+    }
   }
 
   /**
@@ -232,9 +269,7 @@ export class VirtualList {
             this.start++;
           }
           this.#updateElement("down");
-          if (container) {
-            container.style.height = `${container.scrollHeight}px`;
-          }
+          syncContainerHeight(container);
           didUpdate = true;
         }
       }
@@ -260,18 +295,24 @@ export class VirtualList {
     let didUpdate = false;
     let failed = false;
     try {
+      const container = getContainer();
       const page = this.start - 1;
       const data = await this.props.getPage(page);
       if (Array.isArray(data) && data.length > 0) {
         this.start = page;
+        const recycleCount = Math.min(
+          data.length,
+          this.props.pageSize,
+          this.pool.length,
+        );
         const [recycled, unchanged] = [
-          this.pool.slice(this.props.pageSize, this.pool.length),
-          this.pool.slice(0, this.props.pageSize),
+          this.pool.slice(this.pool.length - recycleCount, this.pool.length),
+          this.pool.slice(0, this.pool.length - recycleCount),
         ];
         this.#blurActiveInRecycled(recycled);
         this.pool = [].concat(recycled, unchanged);
         this.#updateData(recycled, data);
-        this.#updateElement("up");
+        const { anchorDelta, topY } = this.#updateElement("up", recycleCount);
         this.end--;
         if (!this.#hasMore) {
           this.#hasMore = true;
@@ -279,6 +320,23 @@ export class VirtualList {
           if (bottomObserver) {
             this.observer?.observe?.(bottomObserver);
           }
+        }
+
+        if (typeof window !== "undefined") {
+          const currentScrollY = window.scrollY ?? 0;
+          const targetScrollY = Math.max(topY, currentScrollY + anchorDelta);
+          const scrollDelta = targetScrollY - currentScrollY;
+          if (scrollDelta > 0) {
+            syncContainerHeight(container);
+            adjustWindowScroll(scrollDelta);
+          } else {
+            if (scrollDelta < 0) {
+              adjustWindowScroll(scrollDelta);
+            }
+            syncContainerHeight(container);
+          }
+        } else {
+          syncContainerHeight(container);
         }
         didUpdate = true;
       }
@@ -313,6 +371,14 @@ export class VirtualList {
       ? bottomObserver.getBoundingClientRect()
       : null;
 
+    if (
+      !hasLayoutBox(topRect) ||
+      !hasLayoutBox(bottomRect) ||
+      bottomRect.top <= topRect.top
+    ) {
+      return;
+    }
+
     const topVisible = isIntersectingViewport(topRect, viewportHeight);
     const bottomVisible = isIntersectingViewport(bottomRect, viewportHeight);
 
@@ -320,14 +386,9 @@ export class VirtualList {
       return;
     }
 
-    const canCheckTop =
-      skipObserverId !== "top-observer" &&
-      this.start > 0 &&
-      hasLayoutBox(topRect);
+    const canCheckTop = skipObserverId !== "top-observer" && this.start > 0;
     const canCheckBottom =
-      skipObserverId !== "bottom-observer" &&
-      this.#hasMore &&
-      hasLayoutBox(bottomRect);
+      skipObserverId !== "bottom-observer" && this.#hasMore;
 
     const atTopBoundary =
       canCheckTop && topRect.bottom >= topRect.height * OBSERVER_THRESHOLD;
@@ -377,11 +438,12 @@ export class VirtualList {
    * 2. Updates absolute position of elements and observers
    *
    * @param direction {"up" | "down"}
-   * @return {void}
+   * @param count {number}
+   * @return {{ prependedHeight: number, anchorDelta: number, topY: number }}
    */
-  #updateElement(direction) {
+  #updateElement(direction, count = this.props.pageSize) {
     if (this.pool.length === 0) {
-      return;
+      return { prependedHeight: 0, anchorDelta: 0, topY: 0 };
     }
     const [topObserver, bottomObserver] = getObservers();
     const yValues = this.pool.map((el) => {
@@ -402,7 +464,7 @@ export class VirtualList {
         ? isPoolFull
           ? recycledStart
           : 0
-        : Math.min(this.props.pageSize - 1, lastIndex);
+        : Math.min(count - 1, lastIndex);
     const end = direction === "down" ? this.pool.length : 0;
 
     // Phase 1: Batch DOM geometry reads before any style or attribute mutations
@@ -412,8 +474,7 @@ export class VirtualList {
         heights[i] = this.pool[i].getBoundingClientRect().height;
       }
     } else {
-      const measureEnd = Math.min(lastIndex, start + 1);
-      for (let i = Math.max(0, end + 1); i <= measureEnd; i++) {
+      for (let i = end; i <= start; i++) {
         heights[i] = this.pool[i].getBoundingClientRect().height;
       }
     }
@@ -422,6 +483,10 @@ export class VirtualList {
     }
 
     // Phase 2: Compute target vertical positions in memory
+    let prependedHeight = 0;
+    let anchorDelta = 0;
+    let writeEnd = start;
+
     if (direction === "down") {
       for (let i = start; i < end; i++) {
         if (i === 0 || yValues[i - 1] == null) {
@@ -432,15 +497,38 @@ export class VirtualList {
         }
       }
     } else {
-      for (let i = start; i >= end; i--) {
-        if (i + 1 >= this.pool.length || yValues[i + 1] == null) {
-          yValues[i] = 0;
-        } else {
-          yValues[i] = Math.max(
-            0,
-            yValues[i + 1] - (heights[i + 1] + 2 * MARGIN),
-          );
-          shouldTransform[i] = true;
+      for (let i = end; i <= start; i++) {
+        prependedHeight += heights[i] + 2 * MARGIN;
+      }
+      const anchorIndex = start + 1;
+      const hasAnchor =
+        anchorIndex < this.pool.length && yValues[anchorIndex] != null;
+      const previousAnchorY = hasAnchor ? yValues[anchorIndex] : 0;
+      const firstY =
+        !hasAnchor || this.start === 0
+          ? 0
+          : Math.max(0, previousAnchorY - prependedHeight);
+
+      yValues[end] = firstY;
+      if (hasAnchor || firstY !== 0) {
+        shouldTransform[end] = true;
+      }
+      for (let i = end + 1; i <= start; i++) {
+        yValues[i] = yValues[i - 1] + (heights[i - 1] + 2 * MARGIN);
+        shouldTransform[i] = true;
+      }
+
+      if (hasAnchor) {
+        const newAnchorY = firstY + prependedHeight;
+        anchorDelta = newAnchorY - previousAnchorY;
+        if (anchorDelta !== 0) {
+          writeEnd = lastIndex;
+          for (let i = anchorIndex; i <= lastIndex; i++) {
+            if (yValues[i] != null) {
+              yValues[i] = Math.max(0, yValues[i] + anchorDelta);
+              shouldTransform[i] = true;
+            }
+          }
         }
       }
     }
@@ -456,7 +544,7 @@ export class VirtualList {
         }
       }
     } else {
-      for (let i = start; i >= end; i--) {
+      for (let i = writeEnd; i >= end; i--) {
         const current = this.pool[i];
         const yPos = yValues[i];
         y(current, yPos);
@@ -470,6 +558,12 @@ export class VirtualList {
     const bottomObserverY =
       yValues[lastIndex] + heights[lastIndex] + MARGIN * 2;
     bottomObserver.style.transform = `translateY(${bottomObserverY}px)`;
+
+    return {
+      prependedHeight,
+      anchorDelta,
+      topY: yValues[0],
+    };
   }
 
   /**
