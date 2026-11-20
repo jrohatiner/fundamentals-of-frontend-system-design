@@ -213,6 +213,7 @@ export class VirtualList {
                             this.pool.slice(this.props.pageSize, this.pool.length),
                             this.pool.slice(0, this.props.pageSize)
                         ];
+                        this.#blurActiveInRecycled(recycled);
                         this.pool = [].concat(
                             unchanged,
                             recycled
@@ -251,12 +252,13 @@ export class VirtualList {
         try {
             const page = this.start - 1;
             const data = await this.props.getPage(page);
-            if (data?.length) {
+            if (Array.isArray(data) && data.length > 0) {
                 this.start = page;
                 const [recycled, unchanged] = [
                     this.pool.slice(this.props.pageSize, this.pool.length),
                     this.pool.slice(0, this.props.pageSize)
                 ];
+                this.#blurActiveInRecycled(recycled);
                 this.pool = [].concat(
                     recycled,
                     unchanged
@@ -319,6 +321,35 @@ export class VirtualList {
             void this.#handleTopObserver();
         } else if (atBottomBoundary && !atTopBoundary) {
             void this.#handleBottomObserver();
+        }
+    }
+
+    /**
+     * Blurs `document.activeElement` if focus resides on or inside any element
+     * being recycled so coordinate updates do not trigger browser focus jumps.
+     *
+     * @param recycled {HTMLElement[]}
+     * @return {void}
+     */
+    #blurActiveInRecycled(recycled) {
+        const activeElement = typeof document !== 'undefined' ? document.activeElement : null;
+        if (!activeElement || typeof activeElement.blur !== 'function') {
+            return;
+        }
+        const containsTarget = (root, target) => {
+            if (root === target) {
+                return true;
+            }
+            if (typeof root?.contains === 'function') {
+                return root.contains(target);
+            }
+            if (Array.isArray(root?.children)) {
+                return root.children.some((child) => containsTarget(child, target));
+            }
+            return false;
+        };
+        if (recycled.some((el) => containsTarget(el, activeElement))) {
+            document.activeElement.blur();
         }
     }
 
