@@ -1,11 +1,6 @@
-export function createCardElement(title, body) {
-  const template = document.getElementById("card_template");
-  const element = template.content.cloneNode(true).firstElementChild;
-  const [cardTitle] = element.getElementsByTagName("h3");
-  const [cardBody] = element.getElementsByTagName("section");
-  [cardTitle.textContent, cardBody.textContent] = [title, body];
-  return element;
-}
+import { createCardElement, updateCardElement } from "../../utils/card.js";
+
+export { createCardElement, updateCardElement };
 
 export const HEADING_COMMAND_REGEX =
   /^\/h([1-3])(?![0-9])[ \t\u00a0]?([\s\S]*)$/;
