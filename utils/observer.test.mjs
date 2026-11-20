@@ -245,13 +245,12 @@ describe("intersectionObserver unit tests", () => {
     globalThis.Element = MainRealmElement;
 
     const mainEl = new MainRealmElement();
-    const iframeEl = Object.assign(new IframeRealmElement(), {
-      ownerDocument: {
-        defaultView: {
-          Element: IframeRealmElement,
-        },
+    const iframeEl = new IframeRealmElement();
+    iframeEl.ownerDocument = {
+      defaultView: {
+        Element: IframeRealmElement,
       },
-    });
+    };
     const fakeElementLiteral = { nodeType: 1, tagName: "DIV" };
 
     const observer = intersectionObserver(
@@ -267,20 +266,36 @@ describe("intersectionObserver unit tests", () => {
     const defaultObs = intersectionObserver(el, () => {});
     assert.deepEqual(defaultObs.options, { threshold: 0.25 });
 
+    const undefinedConfigObs = intersectionObserver(el, () => {}, undefined);
+    assert.deepEqual(undefinedConfigObs.options, { threshold: 0.25 });
+
     const emptyConfigObs = intersectionObserver(el, () => {}, {});
     assert.deepEqual(emptyConfigObs.options, { threshold: 0.25 });
 
-    const customObs = intersectionObserver(el, () => {}, {
+    const customConfig = {
       threshold: [0, 0.75],
       rootMargin: "16px",
-    });
+    };
+    const customObs = intersectionObserver(el, () => {}, customConfig);
     assert.deepEqual(customObs.options, {
       threshold: [0, 0.75],
       rootMargin: "16px",
     });
+    assert.notEqual(customObs.options, customConfig);
+
+    // Mutating returned options must not leak into subsequent default observer calls
+    customObs.options.threshold = 0.99;
 
     const subsequentDefaultObs = intersectionObserver(el, () => {}, null);
     assert.deepEqual(subsequentDefaultObs.options, { threshold: 0.25 });
+
+    const nonThresholdObs = intersectionObserver(el, () => {}, {
+      rootMargin: "32px",
+    });
+    assert.deepEqual(nonThresholdObs.options, {
+      threshold: 0.25,
+      rootMargin: "32px",
+    });
   });
 });
 
@@ -607,6 +622,7 @@ async function launchHeadlessChrome(chromeBin) {
       }
       await new Promise((resolve) => proc.once("exit", resolve));
     }
+    proc.stderr.destroy();
     await rm(userDataDir, {
       recursive: true,
       force: true,
