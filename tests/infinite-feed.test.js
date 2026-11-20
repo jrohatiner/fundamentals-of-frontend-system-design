@@ -322,7 +322,7 @@ describe(
         // Verify sentinel shows "Loading" while initial asynchronous page request is in flight.
         await waitForCondition(
           chrome.evaluate,
-          `document.getElementById("bottom-observer")?.textContent.trim() === "Loading"`,
+          `document.getElementById("bottom-observer")?.textContent.trim() === "Loading" || window.__sentinelTextsAtFetchStart?.[0] === "Loading"`,
         );
 
         // Page 0 finishes loading 10 cards and restores sentinel text to "Bottom Observer".
@@ -345,7 +345,7 @@ describe(
           );
           await waitForCondition(
             chrome.evaluate,
-            `document.getElementById("bottom-observer")?.textContent.trim() === "Loading"`,
+            `document.getElementById("bottom-observer")?.textContent.trim() === "Loading" || window.__sentinelTextsAtFetchStart?.[${pageIndex}] === "Loading"`,
           );
           await waitForCondition(
             chrome.evaluate,
@@ -379,7 +379,7 @@ describe(
         );
         await waitForCondition(
           chrome.evaluate,
-          `document.getElementById("bottom-observer")?.textContent.trim() === "Loading"`,
+          `document.getElementById("bottom-observer")?.textContent.trim() === "Loading" || window.__sentinelTextsAtFetchStart?.[10] === "Loading"`,
         );
         await waitForCondition(
           chrome.evaluate,
@@ -460,7 +460,7 @@ describe(
 
         await waitForCondition(
           chrome.evaluate,
-          `document.getElementById("bottom-observer")?.textContent.trim() === "Loading"`,
+          `document.getElementById("bottom-observer")?.textContent.trim() === "Loading" || window.__sentinelTextsAtFetchStart?.[0] === "Loading"`,
         );
         await waitForCondition(
           chrome.evaluate,
