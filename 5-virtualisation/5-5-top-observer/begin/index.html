@@ -1,54 +1,60 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
-<head>
-    <meta charset="UTF-8">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Virtualisation</title>
-    <link rel="stylesheet" href="../../../styles/index.css">
-    <link rel="stylesheet" href="./virtualisation.css">
+    <link rel="stylesheet" href="../../../styles/index.css" />
+    <link rel="stylesheet" href="./virtualisation.css" />
     <template id="card_template">
-        <article class="card">
-            <h3></h3>
-            <div class="card__body">
-                <div class='card__body__image'></div>
-                <section class='card__body__content' contenteditable="true">
-                </section>
-            </div>
-        </article>
+      <article class="card">
+        <h3></h3>
+        <div class="card__body">
+          <div class="card__body__image"></div>
+          <section class="card__body__content" contenteditable="true"></section>
+        </div>
+      </article>
     </template>
-</head>
-<body>
-<nav aria-label="Skip links">
-    <a class="skip-link" href="#container">Skip to main content</a>
-    <a class="skip-link" href="#list-end">Skip card list</a>
-</nav>
-<main id="container" tabindex="-1"></main>
-<div id="list-end" tabindex="-1"></div>
-<script type="module">
-    import {VirtualList} from "./virtual-list.js";
-    import {initMockDB} from "../../../utils/db.js";
-    const container = document.getElementById('container');
-    const DB = initMockDB({title: 'Frontend System Design', body: 'Frontend System Design'});
-    const template = document.getElementById('card_template');
+  </head>
+  <body>
+    <nav aria-label="Skip links">
+      <a class="skip-link" href="#container">Skip to main content</a>
+      <a class="skip-link" href="#list-end">Skip card list</a>
+    </nav>
+    <main id="container" tabindex="-1"></main>
+    <div id="list-end" tabindex="-1"></div>
+    <script type="module">
+      import { VirtualList } from "./virtual-list.js";
+      import { initMockDB } from "../../../utils/db.js";
+      const container = document.getElementById("container");
+      const DB = initMockDB({
+        title: "Frontend System Design",
+        body: "Frontend System Design",
+      });
+      const template = document.getElementById("card_template");
 
-    const updateTemplate = (element, datum) => {
+      const updateTemplate = (element, datum) => {
         const [cardTitle] = element.getElementsByTagName("h3");
         const [cardBody] = element.getElementsByTagName("section");
-        [cardTitle.textContent, cardBody.textContent] = [datum.title, datum.body];
-    }
+        [cardTitle.textContent, cardBody.textContent] = [
+          datum.title,
+          datum.body,
+        ];
+      };
 
-    const getTemplate = (datum) => {
+      const getTemplate = (datum) => {
         const element = template.content.firstElementChild.cloneNode(true);
-        updateTemplate(element, datum)
+        updateTemplate(element, datum);
         return element;
-    }
+      };
 
-    const list = new VirtualList(container, {
+      const list = new VirtualList(container, {
         getPage: (p) => DB.getPage(p),
         getTemplate,
         updateTemplate,
-        pageSize: 10
-    });
-    list.render();
-</script>
-</body>
+        pageSize: 10,
+      });
+      list.render();
+    </script>
+  </body>
 </html>

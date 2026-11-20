@@ -1,0 +1,180 @@
+name: Release Workshop Bundles
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    name: Package (${{ matrix.module }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        module:
+          - 1-dom
+          - 2-intersection-observer
+          - 3-mutation-observer
+          - 4-resize-observer
+          - 5-virtualisation
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Package workshop module archive
+        shell: bash
+        env:
+          MODULE: ${{ matrix.module }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+
+          if [[ ! "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$ ]]; then
+            echo "Invalid semantic version tag: $RELEASE_TAG" >&2
+            exit 1
+          fi
+
+          if [[ ! -d "$MODULE" ]]; then
+            echo "Workshop module directory not found: $MODULE" >&2
+            exit 1
+          fi
+
+          bundle_name="${MODULE}-${RELEASE_TAG}"
+          module_dist_dir="dist/${MODULE}"
+          stage_dir="${module_dist_dir}/stage/${bundle_name}"
+          archive_path="${module_dist_dir}/${bundle_name}.tar.gz"
+
+          rm -rf -- "$module_dist_dir"
+          mkdir -p -- "$stage_dir"
+
+          cp -R -- "$MODULE" styles utils README.md LICENSE "$stage_dir/"
+          tar -C "${module_dist_dir}/stage" -czf "$archive_path" "$bundle_name"
+          rm -rf -- "${module_dist_dir}/stage"
+
+          ls -lh -- "$archive_path"
+
+      - name: Upload packaged module artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: workshop-module-${{ matrix.module }}
+          path: dist/${{ matrix.module }}/*.tar.gz
+          if-no-files-found: error
+
+  checksums:
+    name: Generate SHA-256 Checksums
+    needs: package
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download module artifacts into isolated directories
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          pattern: workshop-module-*
+          path: dist/downloaded
+          merge-multiple: false
+
+      - name: Assemble archives and generate checksums.sha256
+        shell: bash
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+
+          if [[ ! "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$ ]]; then
+            echo "Invalid semantic version tag: $RELEASE_TAG" >&2
+            exit 1
+          fi
+
+          rm -rf -- release-assets
+          mkdir -p -- release-assets
+
+          shopt -s nullglob
+          archives=(dist/downloaded/workshop-module-*/*.tar.gz)
+          if (( ${#archives[@]} != 5 )); then
+            echo "Expected 5 packaged workshop archives, found ${#archives[@]}" >&2
+            exit 1
+          fi
+
+          for archive in "${archives[@]}"; do
+            base_name="$(basename -- "$archive")"
+            if [[ -e "release-assets/${base_name}" ]]; then
+              echo "Asset collision detected for ${base_name}" >&2
+              exit 1
+            fi
+            cp -- "$archive" "release-assets/${base_name}"
+          done
+
+          (
+            cd release-assets
+            LC_ALL=C sha256sum -- *.tar.gz > checksums.sha256
+            sha256sum -c checksums.sha256
+          )
+
+          cat release-assets/checksums.sha256
+
+      - name: Upload verified release bundle
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: release-bundle
+          path: release-assets/*
+          if-no-files-found: error
+
+  publish:
+    name: Publish GitHub Release
+    needs: checksums
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download verified release bundle
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: release-bundle
+          path: release-assets
+
+      - name: Verify checksums and publish GitHub Release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+
+          if [[ ! "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$ ]]; then
+            echo "Invalid semantic version tag: $RELEASE_TAG" >&2
+            exit 1
+          fi
+
+          (
+            cd release-assets
+            sha256sum -c checksums.sha256
+          )
+
+          shopt -s nullglob
+          assets=(release-assets/*.tar.gz release-assets/checksums.sha256)
+          if (( ${#assets[@]} != 6 )); then
+            echo "Expected 5 module archives plus checksums.sha256, found ${#assets[@]} files" >&2
+            exit 1
+          fi
+
+          release_flags=(
+            --repo "$GH_REPO"
+            --title "$RELEASE_TAG"
+            --verify-tag
+            --generate-notes
+          )
+          if [[ "$RELEASE_TAG" == *-* ]]; then
+            release_flags+=(--prerelease)
+          fi
+
+          if gh release view "$RELEASE_TAG" --repo "$GH_REPO" >/dev/null 2>&1; then
+            gh release upload "$RELEASE_TAG" "${assets[@]}" --clobber --repo "$GH_REPO"
+          else
+            gh release create "$RELEASE_TAG" "${assets[@]}" "${release_flags[@]}"
+          fi
