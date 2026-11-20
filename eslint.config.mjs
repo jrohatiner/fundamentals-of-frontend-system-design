@@ -45,7 +45,6 @@ export default [
       "**/begin/**/*.html",
       "5-virtualisation/5-4-1-elements-pool-and-recycling-preparation/end/virtual-list.js",
       "5-virtualisation/5-4-2-elements-pool-and-recycling-rendering/end/virtual-list.js",
-      "5-virtualisation/5-4-elements-pool-and-recycling/end/virtual-list.js",
       "5-virtualisation/5-5-top-observer/end/virtual-list.js",
       "utils/db.js",
     ],

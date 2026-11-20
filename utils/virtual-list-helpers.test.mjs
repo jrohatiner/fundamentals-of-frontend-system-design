@@ -9,11 +9,10 @@ import { MARGIN, getList, y } from "./virtual-list-helpers.js";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(__dirname, "..");
 
-const EIGHT_MODULES = [
+const VIRTUAL_LIST_MODULES = [
   "5-virtualisation/5-4-1-elements-pool-and-recycling-preparation/end/virtual-list.js",
   "5-virtualisation/5-4-2-elements-pool-and-recycling-rendering/begin/virtual-list.js",
   "5-virtualisation/5-4-2-elements-pool-and-recycling-rendering/end/virtual-list.js",
-  "5-virtualisation/5-4-elements-pool-and-recycling/end/virtual-list.js",
   "5-virtualisation/5-5-top-observer/begin/virtual-list.js",
   "5-virtualisation/5-5-top-observer/end/virtual-list.js",
   "5-virtualisation/5-6-scroll-preservation/begin/virtual-list.js",
@@ -106,8 +105,8 @@ describe("utils/virtual-list-helpers.js", () => {
     assert.equal(y(undefined, 128), undefined);
   });
 
-  it("replaces local MARGIN, getList, and y definitions across all eight virtualization modules", async () => {
-    for (const relPath of EIGHT_MODULES) {
+  it("replaces local MARGIN, getList, and y definitions across all active virtualization modules", async () => {
+    for (const relPath of VIRTUAL_LIST_MODULES) {
       const absPath = resolve(repoRoot, relPath);
       const source = await readFile(absPath, "utf8");
 
@@ -134,8 +133,8 @@ describe("utils/virtual-list-helpers.js", () => {
     }
   });
 
-  it("executes render and bottom observer lifecycle across all eight virtualization modules without runtime errors", async () => {
-    for (const relPath of EIGHT_MODULES) {
+  it("executes render and bottom observer lifecycle across all active virtualization modules without runtime errors", async () => {
+    for (const relPath of VIRTUAL_LIST_MODULES) {
       const elementsById = new Map();
       let observerCallback = null;
 
