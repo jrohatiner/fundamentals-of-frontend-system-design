@@ -69,18 +69,27 @@
  const observer = new ResizeObserver((entries) => {
      for(let entry of entries) {
          const {borderBoxSize: [{inlineSize, blockSize}], target} = entry;
-         console.log(inlineSize, blockSize)
-         if(inlineSize < 150 && blockSize < 150) {
+         const isSmall = inlineSize < 150 && blockSize < 150;
+         const nextState = isSmall ? "true" : "false";
+         if (target.dataset.small === nextState) {
+             continue;
+         }
+         const isInitialLarge = target.dataset.small === undefined && !isSmall;
+         target.dataset.small = nextState;
+         if (isInitialLarge) {
+             continue;
+         }
+         if(isSmall) {
             target.style.borderRadius = "100%";
-            target.style.borderWidth = "4px"
+            target.style.borderWidth = "4px";
         } else {
             target.style.borderRadius = "unset";
-            target.style.borderWidth = "unset"
+            target.style.borderWidth = "unset";
         }
      }
  })
  const elements = document.querySelectorAll('.box');
- elements.forEach(el => observer.observe(el));
+ elements.forEach(el => observer.observe(el, { box: 'border-box' }));
 </script>
 </body>
 </html>
