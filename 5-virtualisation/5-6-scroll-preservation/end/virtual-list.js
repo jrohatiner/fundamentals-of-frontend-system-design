@@ -15,6 +15,10 @@ function getContainer() {
     return document.getElementById('container');
 }
 
+function getStatus() {
+    return document.getElementById('virtual-list-status');
+}
+
 /**
  * Returns `data-y` attribute of the HTMLElement, if value is provided
  * additionally updates the attribute
@@ -31,13 +35,19 @@ function y(element, value = undefined) {
 }
 
 export class VirtualList {
+    #pendingLoads = 0;
+    #setSize = -1;
+    #maxKnownItems = 0;
+
     /**
      * @param root {HTMLElement}
      * @param props {{
      *    getPage: <T>(page: number) => Promise<T[]>,
      *    pageSize: number,
+     *    totalItems?: number,
+     *    setSize?: number,
      *    getTemplate: (...args:any) => HTMLElement,
-     *    updateTemplate: <T>(target: HTMLElement, datum:T) => void,
+     *    updateTemplate: <T>(target: HTMLElement, datum:T, meta?: { posInSet: number, setSize: number }) => void,
      * }}
      */
     constructor(root, props) {
@@ -47,22 +57,28 @@ export class VirtualList {
         this.root = root;
         this.pool = [];
         this.poolLimit = this.props.pageSize * 2;
+        const configuredSize = this.props.setSize ?? this.props.totalItems;
+        if (Number.isInteger(configuredSize) && configuredSize > 0) {
+            this.#setSize = configuredSize;
+        }
     }
 
     /**
      * Returns an HTML Representation of the component, should have the following structure:
      * #container >
+     *    #virtual-list-status+
      *    .top-observer+
      *    #virtual-list+
      *    #bottom-observer
      * @returns {string}
      */
     toHTML() {
-        return `<div id="container">
+        return `<main id="container">
+        <div id="virtual-list-status" class="sr-only" role="status" aria-live="polite" aria-atomic="true"></div>
         <div id="top-observer">Top Observer</div>
-        <main id="virtual-list"></main>
+        <div id="virtual-list" role="feed" aria-label="Feed" aria-busy="false"></div>
         <div id="bottom-observer">Bottom Observer</div>
-        </div>`.trim();
+        </main>`.trim();
     }
 
     /**
@@ -72,6 +88,18 @@ export class VirtualList {
      */
     render() {
         this.root.innerHTML = this.toHTML();
+        const list = getList();
+        if (list) {
+            if (!list.getAttribute('role')) {
+                list.setAttribute('role', 'feed');
+            }
+            if (!list.getAttribute('aria-label')) {
+                list.setAttribute('aria-label', 'Feed');
+            }
+            if (!list.getAttribute('aria-busy')) {
+                list.setAttribute('aria-busy', 'false');
+            }
+        }
         this.#effect()
     }
 
@@ -113,31 +141,68 @@ export class VirtualList {
     async #handleBottomObserver() {
         const container = getContainer();
         const list = getList();
-        const data = await this.props.getPage(this.end++);
-        if (!data?.length) {
-            this.end--;
-            return;
+        const pageIndex = this.end++;
+        let busyReleased = false;
+        this.#beginLoad(list);
+        try {
+            let data;
+            try {
+                data = await this.props.getPage(pageIndex);
+            } catch (err) {
+                this.end--;
+                throw err;
+            }
+            if (!data?.length) {
+                this.end--;
+                if (this.#setSize === -1 && this.#maxKnownItems > 0) {
+                    this.#setSize = this.#maxKnownItems;
+                    this.#syncPoolSetSize();
+                }
+                return;
+            }
+            const basePosInSet = pageIndex * this.props.pageSize + 1;
+            const batchEnd = basePosInSet + data.length - 1;
+            if (batchEnd > this.#maxKnownItems) {
+                this.#maxKnownItems = batchEnd;
+            }
+            if (this.#setSize === -1 && data.length < this.props.pageSize) {
+                this.#setSize = batchEnd;
+                this.#syncPoolSetSize();
+            }
+            const setSize = this.#setSize;
+            if (this.pool.length < this.poolLimit) {
+                const fragment = new DocumentFragment();
+                const elements = data.map((datum, index) => {
+                    const posInSet = basePosInSet + index;
+                    const el = this.props.getTemplate(datum, { posInSet, setSize });
+                    this.#applyItemAria(el, posInSet, setSize);
+                    return el;
+                });
+                elements.forEach(el => fragment.appendChild(el));
+                this.pool.push(...elements);
+                list.appendChild(fragment);
+            } else {
+                const [unchanged, recycled] = [
+                    this.pool.slice(this.props.pageSize, this.pool.length),
+                    this.pool.slice(0, this.props.pageSize)
+                ];
+                this.pool = [].concat(
+                    unchanged,
+                    recycled
+                );
+                this.#updateData(recycled, data, basePosInSet);
+                this.start++;
+            }
+            this.#updateElement("down");
+            container.style.height = `${container.scrollHeight}px`;
+            this.#endLoad(list);
+            busyReleased = true;
+            this.#announceStatus(basePosInSet, batchEnd);
+        } finally {
+            if (!busyReleased) {
+                this.#endLoad(list);
+            }
         }
-        if (this.pool.length < this.poolLimit) {
-            const fragment = new DocumentFragment();
-            const elements = data.map(datum => this.props.getTemplate(datum))
-            elements.forEach(el => fragment.appendChild(el));
-            this.pool.push(...elements)
-            list.appendChild(fragment);
-        } else {
-            const [unchanged, recycled] = [
-                this.pool.slice(this.props.pageSize, this.pool.length),
-                this.pool.slice(0, this.props.pageSize)
-            ];
-            this.pool = [].concat(
-                unchanged,
-                recycled
-            );
-            this.#updateData(recycled, data)
-            this.start++;
-        }
-        this.#updateElement("down");
-        container.style.height = `${container.scrollHeight}px`;
     }
 
     /**
@@ -145,18 +210,43 @@ export class VirtualList {
      * @returns Promise<void>
      */
     async #handleTopObserver() {
-        const data = await this.props.getPage(--this.start)
-        const [recycled, unchanged] = [
-            this.pool.slice(this.props.pageSize, this.pool.length),
-            this.pool.slice(0, this.props.pageSize)
-        ];
-        this.pool = [].concat(
-            recycled,
-            unchanged
-        );
-        this.#updateElement("up");
-        this.#updateData(recycled, data);
-        this.end--;
+        const list = getList();
+        const pageIndex = --this.start;
+        let busyReleased = false;
+        this.#beginLoad(list);
+        try {
+            let data;
+            try {
+                data = await this.props.getPage(pageIndex);
+            } catch (err) {
+                this.start++;
+                throw err;
+            }
+            if (!data?.length) {
+                this.start++;
+                return;
+            }
+            const basePosInSet = pageIndex * this.props.pageSize + 1;
+            const batchEnd = basePosInSet + data.length - 1;
+            const [recycled, unchanged] = [
+                this.pool.slice(this.props.pageSize, this.pool.length),
+                this.pool.slice(0, this.props.pageSize)
+            ];
+            this.pool = [].concat(
+                recycled,
+                unchanged
+            );
+            this.#updateElement("up");
+            this.#updateData(recycled, data, basePosInSet);
+            this.end--;
+            this.#endLoad(list);
+            busyReleased = true;
+            this.#announceStatus(basePosInSet, batchEnd);
+        } finally {
+            if (!busyReleased) {
+                this.#endLoad(list);
+            }
+        }
     }
 
 
@@ -253,12 +343,92 @@ export class VirtualList {
     }
 
     /**
+     * @param elements {HTMLElement[]}
+     * @param data {any[]}
+     * @param basePosInSet {number}
      * @return {void}
      */
-    #updateData(elements, data) {
-        for (let i = 0; i < elements.length; i++) {
-            this.props.updateTemplate(elements[i], data[i]);
+    #updateData(elements, data, basePosInSet) {
+        const count = Math.min(elements.length, data.length);
+        const setSize = this.#setSize;
+        for (let i = 0; i < count; i++) {
+            const posInSet = basePosInSet + i;
+            this.props.updateTemplate(elements[i], data[i], { posInSet, setSize });
+            this.#applyItemAria(elements[i], posInSet, setSize);
         }
+    }
+
+    /**
+     * @param element {HTMLElement}
+     * @param posInSet {number}
+     * @param setSize {number}
+     * @return {void}
+     */
+    #applyItemAria(element, posInSet, setSize) {
+        if (!element) {
+            return;
+        }
+        const posValue = String(posInSet);
+        const sizeValue = String(setSize);
+        if (element.getAttribute('aria-posinset') !== posValue) {
+            element.setAttribute('aria-posinset', posValue);
+        }
+        if (element.getAttribute('aria-setsize') !== sizeValue) {
+            element.setAttribute('aria-setsize', sizeValue);
+        }
+    }
+
+    /**
+     * @return {void}
+     */
+    #syncPoolSetSize() {
+        const sizeValue = String(this.#setSize);
+        for (let i = 0; i < this.pool.length; i++) {
+            const el = this.pool[i];
+            if (el && el.getAttribute('aria-setsize') !== sizeValue) {
+                el.setAttribute('aria-setsize', sizeValue);
+            }
+        }
+    }
+
+    /**
+     * @param list {?HTMLElement}
+     * @return {void}
+     */
+    #beginLoad(list) {
+        this.#pendingLoads++;
+        if (list) {
+            list.setAttribute('aria-busy', 'true');
+        }
+    }
+
+    /**
+     * @param list {?HTMLElement}
+     * @return {void}
+     */
+    #endLoad(list) {
+        this.#pendingLoads = Math.max(0, this.#pendingLoads - 1);
+        if (this.#pendingLoads === 0 && list) {
+            list.setAttribute('aria-busy', 'false');
+        }
+    }
+
+    /**
+     * @param firstPos {number}
+     * @param lastPos {number}
+     * @return {void}
+     */
+    #announceStatus(firstPos, lastPos) {
+        const status = getStatus();
+        if (!status) {
+            return;
+        }
+        const rangeText = firstPos === lastPos
+            ? `item ${firstPos}`
+            : `items ${firstPos} to ${lastPos}`;
+        status.textContent = this.#setSize > 0
+            ? `Loaded ${rangeText} of ${this.#setSize}.`
+            : `Loaded ${rangeText}.`;
     }
 
 }
