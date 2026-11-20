@@ -1,10 +1,10 @@
 # AGENTS.md
 
-## Overview
+## Repository Overview
 
-This repository contains the workshop exercises for **Fundamentals of Frontend System Design** (`1-dom`, `2-intersection-observer`, `3-mutation-observer`, `4-resize-observer`, and `5-virtualisation`).
+This repository contains the zero-bundler browser exercises for the **Fundamentals of Frontend System Design** workshop (`1-dom`, `2-intersection-observer`, `3-mutation-observer`, `4-resize-observer`, and `5-virtualisation`), using shared browser utilities and stylesheets under `styles/` and `utils/`.
 
-Exercises use native browser APIs, HTML, CSS, and ES modules without a bundler or frontend framework. A minimal root Node.js toolchain provides automated linting, formatting checks, and syntax validation locally and in GitHub Actions CI.
+Exercises use native browser APIs, HTML, CSS, and ES modules without a bundler or frontend framework. A minimal root Node.js toolchain and `pre-commit` configuration provide automated linting, formatting checks, and syntax validation locally and in GitHub Actions CI.
 
 ## Prerequisites & Local Setup
 
@@ -43,17 +43,20 @@ Run all validation commands from the repository root. These commands execute in 
 
   Executes `prettier --check` on root configuration, workflow, script, and agent documentation files, followed by `scripts/check-format.mjs` to verify AST parseability (HTML, CSS, JS, JSON, YAML) and whitespace/line-ending hygiene (no tabs, CRLF, trailing whitespace, or conflict markers) across all repository files.
 
+## Running Automated Tests
+
+Execute the Node.js unit test suites using the built-in test runner:
+
+```bash
+node --test 5-virtualisation/5-6-scroll-preservation/end/virtual-list.test.js 5-virtualisation/5-6-scroll-preservation/end/virtual-list.test.mjs
+```
+
 ## CI Parity & Contribution Guidelines
 
 - Pull requests targeting `main` and pushes to `main` automatically run `.github/workflows/pull-request-validation.yml` across Node.js `18.x` and `20.x`.
 - Consecutive pushes to an open pull request automatically cancel superseded in-progress workflow runs.
 - Preserve the zero-bundler workshop design: exercises in `begin/` and `end/` directories must continue to work directly in modern browsers using standard ES modules.
 - Always verify `npm run validate` exits with code `0` and leaves `git status` clean before opening or updating a pull request.
-# Contributor and Agent Guide (`AGENTS.md`)
-
-## Repository Overview
-
-This repository contains vanilla HTML, CSS, and ES module workshop exercises for the Frontend Masters _Fundamentals of Frontend System Design_ course. Exercises run directly in modern browsers without a bundler or frontend framework.
 
 ## Local Pre-commit Guardrails
 
@@ -110,19 +113,6 @@ Binary assets and plain-text files without Prettier parsers are listed in `.pret
 
 1. Add the file path or extension pattern to `.prettierignore` so both `pre-commit` and `npx prettier --check .` bypass Prettier formatting on those files.
 2. If a file must also bypass `trailing-whitespace` or `end-of-file-fixer` (for example, an intentionally malformed test fixture), add a narrow `exclude:` regex pattern to the specific hook entry in `.pre-commit-config.yaml` rather than disabling hooks globally.
-
-## Running Automated Tests
-
-Execute the Node.js unit test suites using the built-in test runner:
-
-```bash
-node --test 5-virtualisation/5-6-scroll-preservation/end/virtual-list.test.js 5-virtualisation/5-6-scroll-preservation/end/virtual-list.test.mjs
-```
-# AGENTS.md
-
-## Repository Overview
-
-This repository contains the zero-bundler browser exercises for the **Fundamentals of Frontend System Design** workshop. Each workshop module lives in its own top-level directory (`1-dom`, `2-intersection-observer`, `3-mutation-observer`, `4-resize-observer`, `5-virtualisation`) and uses shared browser utilities and stylesheets under `styles/` and `utils/`.
 
 ## Local Packaging Commands
 
